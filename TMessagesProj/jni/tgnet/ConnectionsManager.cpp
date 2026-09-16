@@ -234,7 +234,11 @@ void ConnectionsManager::select() {
             lastPushPingTime = now;
             uint8_t offset;
             RAND_bytes(&offset, 1);
-            nextPingTimeOffset = 60000 * 3 + (offset % 40) - 20;
+            // ZG battery (F-06): 4 min minus up to 40 s of jitter (the stock code subtracted
+            // milliseconds, not seconds). Never later than 4:00 so mobile NATs that drop idle
+            // flows at ~4-5 min still see traffic; the server holds the socket for 7 min
+            // (disconnect_delay below) and the 30 s pong timeout / +10 s margin stay as they were.
+            nextPingTimeOffset = 60000 * 4 - (offset % 40) * 1000;
             if (datacenter != nullptr) {
                 sendPing(datacenter, true);
             }
