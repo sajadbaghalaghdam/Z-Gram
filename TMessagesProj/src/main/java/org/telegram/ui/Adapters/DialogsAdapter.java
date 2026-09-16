@@ -546,7 +546,21 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
 
     boolean isCalculatingDiff;
     boolean updateListPending;
-    private final static boolean ALLOW_UPDATE_IN_BACKGROUND = BuildVars.DEBUG_PRIVATE_VERSION;
+    /**
+     * ZG perf: this was BuildVars.DEBUG_PRIVATE_VERSION, i.e. false in every release build, so
+     * `itemInternals.size() < 50 || !ALLOW_UPDATE_IN_BACKGROUND` short-circuited to true and the
+     * synchronous branch was taken for lists of every size - the size threshold never even applied.
+     * DiffUtil.calculateDiff is a Myers diff, O((N+M)*D) with an O(N*M/64) bit-matrix allocation,
+     * and updateList() runs from ViewPage.updateList on every list mutation: every incoming
+     * message, read-state change, draft change and pin. On an 800-dialog account that is several
+     * milliseconds on the frame thread, repeatedly, while the user is scrolling or typing.
+     * The background branch below was fully written and correctly guarded; it just shipped off.
+     */
+    private final static boolean ALLOW_UPDATE_IN_BACKGROUND = true;
+    /**
+     * ZG: invalidates an in-flight background diff. See the comment in updateList().
+     */
+    private int diffGeneration;
 
     public void updateList(Runnable saveScrollPosition) {
         if (isCalculatingDiff) {
@@ -554,16 +568,24 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
             return;
         }
         isCalculatingDiff = true;
+        final int generation = ++diffGeneration;
         oldItems = new ArrayList<>();
         oldItems.addAll(itemInternals);
         updateItemList();
         ArrayList<ItemInternal> newItems = new ArrayList<>(itemInternals);
         itemInternals = oldItems;
 
+        // ZG: the callback below used to read the `oldItems` FIELD. That is safe while the diff is
+        // synchronous, but with the background branch enabled a notifyDataSetChanged() (which
+        // clears isCalculatingDiff) followed by another updateList() can reassign the field while
+        // a diff is still walking it. Snapshot the reference; on the synchronous path this is
+        // exactly the same list object, so nothing about that path changes.
+        final ArrayList<ItemInternal> oldItemsSnapshot = oldItems;
+
         DiffUtil.Callback callback = new DiffUtil.Callback() {
             @Override
             public int getOldListSize() {
-                return oldItems.size();
+                return oldItemsSnapshot.size();
             }
 
             @Override
@@ -573,12 +595,12 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
 
             @Override
             public boolean areItemsTheSame(int oldItemPosition, int newItemPosition) {
-                return oldItems.get(oldItemPosition).compare(newItems.get(newItemPosition));
+                return oldItemsSnapshot.get(oldItemPosition).compare(newItems.get(newItemPosition));
             }
 
             @Override
             public boolean areContentsTheSame(int oldItemPosition, int newItemPosition) {
-                return oldItems.get(oldItemPosition).viewType == newItems.get(newItemPosition).viewType;
+                return oldItemsSnapshot.get(oldItemPosition).viewType == newItems.get(newItemPosition).viewType;
             }
         };
         if (itemInternals.size() < 50 || !ALLOW_UPDATE_IN_BACKGROUND) {
@@ -593,7 +615,11 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
             Utilities.searchQueue.postRunnable(() -> {
                 DiffUtil.DiffResult result = DiffUtil.calculateDiff(callback);
                 AndroidUtilities.runOnUIThread(() -> {
-                    if (!isCalculatingDiff) {
+                    // ZG: `generation != diffGeneration` means a notifyDataSetChanged() and a newer
+                    // updateList() overtook this diff while it was running, so its result no longer
+                    // describes the list the adapter is showing. Dispatching it would raise
+                    // RecyclerView's "Inconsistency detected" - drop it and let the newer one land.
+                    if (!isCalculatingDiff || generation != diffGeneration) {
                         return;
                     }
                     isCalculatingDiff = false;
