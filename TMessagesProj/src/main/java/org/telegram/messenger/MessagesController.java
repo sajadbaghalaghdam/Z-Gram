@@ -273,6 +273,7 @@ public class MessagesController extends BaseController implements NotificationCe
     private LongSparseArray<SparseArray<MessageObject>> pollsToCheck = new LongSparseArray<>();
     private int pollsToCheckSize;
     private long lastViewsCheckTime;
+    private long lastColdTimerPassTime;
     public SparseIntArray premiumFeaturesTypesToPosition = new SparseIntArray();
     public SparseIntArray businessFeaturesTypesToPosition = new SparseIntArray();
     
@@ -10520,7 +10521,14 @@ public class MessagesController extends BaseController implements NotificationCe
     public void updateTimerProc() {
         long currentTime = System.currentTimeMillis();
 
-        checkDeletingTask(false);
+        // ZG battery (F-02): this runs at 1 Hz per account from the native network thread.
+        // Everything that gates message delivery (updates-queue timeouts, read tasks, presence)
+        // stays on every tick; housekeeping with its own coarse timers runs every 5 s.
+        final boolean coldPass = Math.abs(currentTime - lastColdTimerPassTime) >= 5000;
+        if (coldPass) {
+            lastColdTimerPassTime = currentTime;
+            checkDeletingTask(false);
+        }
         checkReadTasks();
 
         if (getUserConfig().isClientActivated()) {
@@ -10814,6 +10822,9 @@ public class MessagesController extends BaseController implements NotificationCe
             if (updated) {
                 AndroidUtilities.runOnUIThread(() -> getNotificationCenter().postNotificationName(NotificationCenter.updateInterfaces, UPDATE_MASK_USER_PRINT));
             }
+        }
+        if (!coldPass) {
+            return;
         }
         if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SCHEDULED && Math.abs(currentTime - lastThemeCheckTime) >= 60) {
             AndroidUtilities.runOnUIThread(themeCheckRunnable);
