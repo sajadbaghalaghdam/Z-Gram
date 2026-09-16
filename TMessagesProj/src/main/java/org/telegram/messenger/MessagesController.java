@@ -13438,6 +13438,53 @@ public class MessagesController extends BaseController implements NotificationCe
                 arrayList.add(messageObject);
                 new_dialogMessage.put(did, arrayList);
             }
+            // ZG: the offset for the next page must be taken from the LAST dialog the server
+            // actually returned, in the server's own order. messages.getDialogs continues strictly
+            // after (offset_date, offset_id, offset_peer), and the list is ordered by
+            // (top message date desc, top message id desc), so the right offset is the returned
+            // dialog with the smallest (date, top_message) pair. This is what TDLib does:
+            // MessagesManager::on_get_dialogs() builds a DialogDate per returned dialog, where
+            // DialogDate::get_dialog_order() packs (date << 32 | message_id), and pages from the
+            // resulting last_server_dialog_date_ (td/telegram/MessagesManager.cpp, DialogDate.h).
+            // The old code picked the message with the smallest date over dialogsRes.messages,
+            // which (a) has no message-id tiebreak, so every other dialog sharing that date is
+            // skipped by the server on the next page and never requested again, and (b) can pick a
+            // message that is not the top message of any returned dialog.
+            TLRPC.Message offsetMessage = null;
+            if (loadType == 0 && !fromCache && !migrate) {
+                LongSparseArray<TLRPC.Message> topMessages = new LongSparseArray<>();
+                for (int a = 0; a < dialogsRes.messages.size(); a++) {
+                    TLRPC.Message message = dialogsRes.messages.get(a);
+                    if (message == null || message.date == 0 || message.peer_id == null) {
+                        continue;
+                    }
+                    long did = MessageObject.getDialogId(message);
+                    TLRPC.Message prev = topMessages.get(did);
+                    if (prev == null || prev.id < message.id) {
+                        topMessages.put(did, message);
+                    }
+                }
+                for (int a = 0; a < dialogsRes.dialogs.size(); a++) {
+                    TLRPC.Dialog d = dialogsRes.dialogs.get(a);
+                    if (d == null || d.top_message == 0) {
+                        continue;
+                    }
+                    long did = DialogObject.getPeerDialogId(d.peer);
+                    if (did == 0) {
+                        continue;
+                    }
+                    TLRPC.Message message = topMessages.get(did);
+                    if (message == null || message.id != d.top_message) {
+                        continue;
+                    }
+                    // dialogsRes.dialogs arrives in the server's order, so on an exact (date, id)
+                    // tie the later entry is the one that sorts last.
+                    if (offsetMessage == null || message.date < offsetMessage.date
+                            || message.date == offsetMessage.date && message.id <= offsetMessage.id) {
+                        offsetMessage = message;
+                    }
+                }
+            }
             if (!fromCache && !migrate && dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetId] != -1 && loadType == 0) {
                 int totalDialogsLoadCount = getUserConfig().getTotalDialogsCount(folderId);
                 int dialogsLoadOffsetId;
@@ -13446,12 +13493,31 @@ public class MessagesController extends BaseController implements NotificationCe
                 long dialogsLoadOffsetChatId = 0;
                 long dialogsLoadOffsetUserId = 0;
                 long dialogsLoadOffsetAccess = 0;
-                if (lastMessage != null && lastMessage.id != dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetId]) {
+                // ZG: stop only when the offset does not move strictly backwards any more - that is
+                // the end of the list (or a server that keeps handing back the same page). The old
+                // check compared message ids only, so an unrelated peer whose top message happened
+                // to carry the same numeric id as the previous offset was read as "end of list"
+                // and Integer.MAX_VALUE was persisted, truncating the dialog list for good.
+                // TDLib does the same monotonicity check with the full (date, id, peer) key:
+                // `if (folder->last_server_dialog_date_ < max_dialog_date)` in on_get_dialogs().
+                boolean offsetAdvanced = false;
+                if (offsetMessage != null) {
+                    int prevOffsetId = (int) dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetId];
+                    int prevOffsetDate = (int) dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetDate];
+                    if (prevOffsetId == 0) {
+                        offsetAdvanced = true;
+                    } else if (offsetMessage.date != prevOffsetDate) {
+                        offsetAdvanced = offsetMessage.date < prevOffsetDate;
+                    } else {
+                        offsetAdvanced = offsetMessage.id < prevOffsetId;
+                    }
+                }
+                if (offsetAdvanced) {
                     totalDialogsLoadCount += dialogsRes.dialogs.size();
-                    dialogsLoadOffsetId = lastMessage.id;
-                    dialogsLoadOffsetDate = lastMessage.date;
-                    if (lastMessage.peer_id.channel_id != 0) {
-                        dialogsLoadOffsetChannelId = lastMessage.peer_id.channel_id;
+                    dialogsLoadOffsetId = offsetMessage.id;
+                    dialogsLoadOffsetDate = offsetMessage.date;
+                    if (offsetMessage.peer_id.channel_id != 0) {
+                        dialogsLoadOffsetChannelId = offsetMessage.peer_id.channel_id;
                         dialogsLoadOffsetChatId = 0;
                         dialogsLoadOffsetUserId = 0;
                         for (int a = 0; a < dialogsRes.chats.size(); a++) {
@@ -13461,8 +13527,8 @@ public class MessagesController extends BaseController implements NotificationCe
                                 break;
                             }
                         }
-                    } else if (lastMessage.peer_id.chat_id != 0) {
-                        dialogsLoadOffsetChatId = lastMessage.peer_id.chat_id;
+                    } else if (offsetMessage.peer_id.chat_id != 0) {
+                        dialogsLoadOffsetChatId = offsetMessage.peer_id.chat_id;
                         dialogsLoadOffsetChannelId = 0;
                         dialogsLoadOffsetUserId = 0;
                         for (int a = 0; a < dialogsRes.chats.size(); a++) {
@@ -13472,8 +13538,8 @@ public class MessagesController extends BaseController implements NotificationCe
                                 break;
                             }
                         }
-                    } else if (lastMessage.peer_id.user_id != 0) {
-                        dialogsLoadOffsetUserId = lastMessage.peer_id.user_id;
+                    } else if (offsetMessage.peer_id.user_id != 0) {
+                        dialogsLoadOffsetUserId = offsetMessage.peer_id.user_id;
                         dialogsLoadOffsetChatId = 0;
                         dialogsLoadOffsetChannelId = 0;
                         for (int a = 0; a < dialogsRes.users.size(); a++) {
@@ -13486,6 +13552,9 @@ public class MessagesController extends BaseController implements NotificationCe
                     }
                 } else {
                     dialogsLoadOffsetId = Integer.MAX_VALUE;
+                }
+                if (BuildVars.LOGS_ENABLED) {
+                    FileLog.d("dialogs folderId " + folderId + " got " + dialogsRes.dialogs.size() + " dialogs, next offset id " + dialogsLoadOffsetId + " date " + dialogsLoadOffsetDate + " total " + totalDialogsLoadCount);
                 }
                 getUserConfig().setDialogsLoadOffset(folderId,
                         dialogsLoadOffsetId,
