@@ -140,10 +140,17 @@ public class LiteMode {
     private static long lastBatteryLevelChecked;
 
     @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    private static BatteryManager batteryManager;
+
     public static int getBatteryLevel() {
-        long time = 0;
-        if (lastBatteryLevelCached < 0 || (time = System.currentTimeMillis()) - lastBatteryLevelChecked > 1000 * 12) {
-            BatteryManager batteryManager = (BatteryManager) ApplicationLoader.applicationContext.getSystemService(Context.BATTERY_SERVICE);
+        // ZG battery (F-19): called from draw paths; keep the BatteryManager and refresh the level
+        // at most once a minute. BatteryReceiver (ACTION_BATTERY_CHANGED) invalidates the cache
+        // whenever the level actually changes, so the timer is only a fallback.
+        long time = System.currentTimeMillis();
+        if (lastBatteryLevelCached < 0 || time - lastBatteryLevelChecked > 1000 * 60) {
+            if (batteryManager == null) {
+                batteryManager = (BatteryManager) ApplicationLoader.applicationContext.getSystemService(Context.BATTERY_SERVICE);
+            }
             if (batteryManager != null) {
                 lastBatteryLevelCached = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
                 lastBatteryLevelChecked = time;
