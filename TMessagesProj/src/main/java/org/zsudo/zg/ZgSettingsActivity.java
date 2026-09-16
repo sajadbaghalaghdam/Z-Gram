@@ -22,7 +22,6 @@ import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
-import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.ActionBar.ThemeDescription;
@@ -147,13 +146,20 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         return fragmentView;
     }
 
+    private void showError(String title, String text) {
+        if (getParentActivity() == null) {
+            return;
+        }
+        showDialog(AlertsCreator.createSimpleAlert(getParentActivity(), title, text).create());
+    }
+
     private void toggleEnabled(TextCheckCell cell) {
         if (controller.isBusy()) {
             return;
         }
         boolean enable = !controller.isEnabled();
         if (enable && !ZgProxyController.isValidVlessUrl(controller.getVlessUrl())) {
-            showDialog(AlertsCreator.createSimpleAlert(getParentActivity(), getString(R.string.ZgProxy), getString(R.string.ZgVlessLinkInvalid)).create());
+            showError(getString(R.string.ZgProxy), getString(R.string.ZgVlessLinkInvalid));
             return;
         }
         cell.setChecked(enable);
@@ -164,8 +170,8 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
             }
             listAdapter.notifyItemChanged(enableRow, ListAdapter.PAYLOAD_CHECKED_CHANGED);
             updateRows();
-            if (enable && !running && getParentActivity() != null) {
-                showDialog(AlertsCreator.createSimpleAlert(getParentActivity(), getString(R.string.ZgStartFailed), TextUtils.isEmpty(error) ? getString(R.string.ZgStatusError) : error).create());
+            if (enable && !running) {
+                showError(getString(R.string.ZgStartFailed), TextUtils.isEmpty(error) ? getString(R.string.ZgStatusError) : error);
             }
         });
     }
@@ -176,7 +182,7 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         }
         AlertsCreator.createSimpleTextInputAlert(getParentActivity(), this, getString(R.string.ZgVlessLink), getString(R.string.ZgVlessLinkInfo), getString(R.string.ZgVlessLinkHint), controller.getVlessUrl(), 4096, getString(R.string.Save), getResourceProvider(), text -> {
             if (!ZgProxyController.isValidVlessUrl(text)) {
-                showDialog(AlertsCreator.createSimpleAlert(getParentActivity(), getString(R.string.ZgProxy), getString(R.string.ZgVlessLinkInvalid)).create());
+                showError(getString(R.string.ZgProxy), getString(R.string.ZgVlessLinkInvalid));
                 return;
             }
             controller.setVlessUrl(text);
@@ -209,7 +215,7 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                 port = -1;
             }
             if (port < 0 || port > 65535) {
-                showDialog(AlertsCreator.createSimpleAlert(getParentActivity(), getString(R.string.ZgProxy), getString(R.string.ZgListenPortInvalid)).create());
+                showError(getString(R.string.ZgProxy), getString(R.string.ZgListenPortInvalid));
                 return;
             }
             controller.setListenPort(port);
@@ -412,8 +418,9 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
             }
         }
 
+        @SuppressWarnings("unchecked")
         @Override
-        public void onBindViewHolder(RecyclerView.ViewHolder holder, int position, java.util.List<Object> payloads) {
+        public void onBindViewHolder(RecyclerView.ViewHolder holder, int position, java.util.List payloads) {
             if (holder.getItemViewType() == VIEW_TYPE_TEXT_CHECK && payloads.contains(PAYLOAD_CHECKED_CHANGED)) {
                 ((TextCheckCell) holder.itemView).setChecked(controller.isEnabled());
             } else {
