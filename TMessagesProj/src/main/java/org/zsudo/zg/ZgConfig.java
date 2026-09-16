@@ -1,9 +1,16 @@
 /*
- * ZG: one saved VLESS/REALITY server, as shown in Telegram's proxy list.
+ * ZG: one saved VLESS server, as shown in Telegram's proxy list.
  *
  * The raw vless:// link is the source of truth: the Rust core parses it. Java only validates the
- * essentials (scheme, uuid, host, port, security=reality with a pbk) so the user gets a clear
- * error instead of a generic "start failed", and reads the #fragment for the display name.
+ * essentials (scheme, uuid, host, port, and a security/transport combination the core implements)
+ * so the user gets a clear error instead of a generic "start failed", and reads the #fragment for
+ * the display name.
+ *
+ * Supported stacks, kept in step with zg-core's config.rs:
+ *
+ *   security=reality + type=tcp|raw + headerType=none    (needs pbk; flow may be xtls-rprx-vision)
+ *   security=none    + type=tcp|raw + headerType=none|http
+ *   security=none    + type=ws                            (path/host are read by the core)
  */
 
 package org.zsudo.zg;
@@ -15,6 +22,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.telegram.messenger.R;
 
+import java.util.Locale;
 import java.util.UUID;
 
 public final class ZgConfig {
@@ -33,8 +41,26 @@ public final class ZgConfig {
 
     // ---------------------------------------------------------------- validation
 
+    /** Lower-cased, trimmed query parameter, or {@code fallback} when absent/blank. */
+    private static String param(Uri uri, String key, String fallback) {
+        String v;
+        try {
+            v = uri.getQueryParameter(key);
+        } catch (Exception e) {
+            // Opaque uri: no query component at all.
+            return fallback;
+        }
+        if (v == null) {
+            return fallback;
+        }
+        v = v.trim();
+        // Locale.ROOT: a Turkish locale would otherwise fold "REALITY" to "realıty".
+        return v.isEmpty() ? fallback : v.toLowerCase(Locale.ROOT);
+    }
+
     /**
-     * Checks the essentials a REALITY link cannot work without.
+     * Checks the essentials a link cannot work without, and that its security/transport
+     * combination is one the Rust core actually implements.
      *
      * @return 0 when the link looks usable, otherwise the string resource describing what is wrong.
      */
@@ -76,20 +102,55 @@ public final class ZgConfig {
         if (port <= 0 || port > 65535) {
             return R.string.ZgLinkErrorPort;
         }
-        String security;
+        // v2rayN/v2rayNG omit a parameter rather than writing its default, so absent == default.
+        final String security = param(parsed, "security", "none");
+        final String encryption = param(parsed, "encryption", "none");
+        final String type = param(parsed, "type", "tcp");
+        final String headerType = param(parsed, "headerType", "none");
+        final String flow = param(parsed, "flow", "");
         String publicKey;
         try {
-            security = parsed.getQueryParameter("security");
             publicKey = parsed.getQueryParameter("pbk");
         } catch (Exception e) {
-            // opaque uri: no query at all
+            publicKey = null;
+        }
+
+        if (!"none".equals(encryption)) {
             return R.string.ZgLinkErrorReality;
         }
-        if (security == null || !"reality".equalsIgnoreCase(security.trim())) {
+        final boolean reality = "reality".equals(security);
+        if (!reality && !"none".equals(security)) {
+            // security=tls and anything else: not implemented by the core.
             return R.string.ZgLinkErrorReality;
         }
-        if (TextUtils.isEmpty(publicKey)) {
-            return R.string.ZgLinkErrorPbk;
+        final boolean tcp = "tcp".equals(type) || "raw".equals(type);
+        final boolean ws = "ws".equals(type) || "websocket".equals(type);
+        if (!tcp && !ws) {
+            // grpc, kcp, httpupgrade, xhttp/splithttp, h2, ...
+            return R.string.ZgLinkErrorReality;
+        }
+        final boolean httpHeader = "http".equals(headerType);
+        if (!httpHeader && !"none".equals(headerType)) {
+            return R.string.ZgLinkErrorReality;
+        }
+        if (httpHeader && !tcp) {
+            // The fake-HTTP header obfuscation only exists on a raw TCP stream.
+            return R.string.ZgLinkErrorReality;
+        }
+        if (reality) {
+            // REALITY is TCP-only here, carries no header obfuscation, and needs its public key.
+            if (ws || httpHeader) {
+                return R.string.ZgLinkErrorReality;
+            }
+            if (TextUtils.isEmpty(publicKey)) {
+                return R.string.ZgLinkErrorPbk;
+            }
+        } else if (!flow.isEmpty()) {
+            // XTLS-Vision needs a TLS-like layer underneath; xray refuses it too.
+            return R.string.ZgLinkErrorReality;
+        }
+        if (!flow.isEmpty() && !"xtls-rprx-vision".equals(flow)) {
+            return R.string.ZgLinkErrorReality;
         }
         return 0;
     }
