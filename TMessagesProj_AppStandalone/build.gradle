@@ -1,3 +1,16 @@
+// ZG: signing credentials come from an untracked keystore.properties at the repo root,
+// so the private key and its password are never committed. Falls back to the upstream
+// gradle.properties values (Telegram's public debug key) when the file is absent.
+def zgKeystore = new Properties()
+def zgKeystoreFile = rootProject.file("keystore.properties")
+if (zgKeystoreFile.exists()) {
+    zgKeystoreFile.withInputStream { zgKeystore.load(it) }
+}
+def zgStoreFile    = zgKeystore.getProperty("storeFile", "../TMessagesProj/config/release.keystore")
+def zgStorePassword = zgKeystore.getProperty("storePassword", RELEASE_STORE_PASSWORD)
+def zgKeyAlias      = zgKeystore.getProperty("keyAlias", RELEASE_KEY_ALIAS)
+def zgKeyPassword   = zgKeystore.getProperty("keyPassword", RELEASE_KEY_PASSWORD)
+
 apply plugin: 'com.android.application'
 
 repositories {
@@ -49,17 +62,17 @@ android {
 
     signingConfigs {
         debug {
-            storeFile file("../TMessagesProj/config/release.keystore")
-            storePassword RELEASE_STORE_PASSWORD
-            keyAlias RELEASE_KEY_ALIAS
-            keyPassword RELEASE_KEY_PASSWORD
+            storeFile file(zgStoreFile)
+            storePassword zgStorePassword
+            keyAlias zgKeyAlias
+            keyPassword zgKeyPassword
         }
 
         release {
-            storeFile file("../TMessagesProj/config/release.keystore")
-            storePassword RELEASE_STORE_PASSWORD
-            keyAlias RELEASE_KEY_ALIAS
-            keyPassword RELEASE_KEY_PASSWORD
+            storeFile file(zgStoreFile)
+            storePassword zgStorePassword
+            keyAlias zgKeyAlias
+            keyPassword zgKeyPassword
         }
     }
 
