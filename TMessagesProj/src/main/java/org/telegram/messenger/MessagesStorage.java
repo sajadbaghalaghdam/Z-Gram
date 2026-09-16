@@ -426,6 +426,8 @@ public class MessagesStorage extends BaseController {
         for (int a = 0; a < 2; a++) {
             getUserConfig().setDialogsLoadOffset(a, 0, 0, 0, 0, 0, 0);
             getUserConfig().setTotalDialogsCount(a, 0);
+            getUserConfig().setServerDialogsCount(a, 0);
+            getUserConfig().setDialogsResyncDone(a, false);
         }
         getUserConfig().saveConfig(false);
     }
@@ -2234,6 +2236,8 @@ public class MessagesStorage extends BaseController {
             for (int a = 0; a < 2; a++) {
                 getUserConfig().setDialogsLoadOffset(a, 0, 0, 0, 0, 0, 0);
                 getUserConfig().setTotalDialogsCount(a, 0);
+                getUserConfig().setServerDialogsCount(a, 0);
+                getUserConfig().setDialogsResyncDone(a, false);
             }
             getUserConfig().clearFilters();
             getUserConfig().clearPinnedDialogsLoaded();

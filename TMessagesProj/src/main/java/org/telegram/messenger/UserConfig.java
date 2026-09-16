@@ -541,6 +541,26 @@ public class UserConfig extends BaseController {
         getPreferences().edit().putInt("2totalDialogsLoadCount" + (folderId == 0 ? "" : folderId), totalDialogsLoadCount).commit();
     }
 
+    // ZG: how many dialogs the server says the folder holds (messages.dialogsSlice.count), used to
+    // notice a dialog list that finished paging with pages missing.
+    public int getServerDialogsCount(int folderId) {
+        return getPreferences().getInt("2serverDialogsCount" + (folderId == 0 ? "" : folderId), 0);
+    }
+
+    public void setServerDialogsCount(int folderId, int serverDialogsCount) {
+        getPreferences().edit().putInt("2serverDialogsCount" + (folderId == 0 ? "" : folderId), serverDialogsCount).commit();
+    }
+
+    // ZG: set once a folder's dialog list has been re-paged from the top to recover such a gap, so
+    // that the recovery runs at most once per account and folder.
+    public boolean isDialogsResyncDone(int folderId) {
+        return getPreferences().getBoolean("2dialogsResyncDone" + (folderId == 0 ? "" : folderId), false);
+    }
+
+    public void setDialogsResyncDone(int folderId, boolean done) {
+        getPreferences().edit().putBoolean("2dialogsResyncDone" + (folderId == 0 ? "" : folderId), done).commit();
+    }
+
     public long[] getDialogLoadOffsets(int folderId) {
         SharedPreferences preferences = getPreferences();
         int dialogsLoadOffsetId = preferences.getInt("2dialogsLoadOffsetId" + (folderId == 0 ? "" : folderId), hasValidDialogLoadIds ? 0 : -1);
