@@ -12886,6 +12886,26 @@ public class MessagesController extends BaseController implements NotificationCe
         }
     }
 
+    /**
+     * ZG: resetDialogs() sets resetingDialogs, which makes every loadDialogs() call return
+     * immediately, and only completeDialogsReset() ever cleared it. Both requests it fires ignored
+     * their error case, so a single failure - a flood wait or a dropped connection right after an
+     * updates.differenceTooLong is enough - left the flag set for the rest of the process and the
+     * dialog list could never be loaded again, however long the user waited or scrolled.
+     */
+    private void cancelDialogsReset() {
+        if (!resetingDialogs) {
+            return;
+        }
+        if (BuildVars.LOGS_ENABLED) {
+            FileLog.d("dialogs reset failed, resuming normal dialog loading");
+        }
+        resetingDialogs = false;
+        resetDialogsPinned = null;
+        resetDialogsAll = null;
+        loadDialogs(0, 0, 100, false);
+    }
+
     private void resetDialogs(boolean query, int seq, int newPts, int date, int qts) {
         if (query) {
             if (resetingDialogs) {
@@ -12902,6 +12922,8 @@ public class MessagesController extends BaseController implements NotificationCe
                         d.pinned = true;
                     }
                     resetDialogs(false, seq, newPts, date, qts);
+                } else {
+                    AndroidUtilities.runOnUIThread(this::cancelDialogsReset);
                 }
             });
             TLRPC.TL_messages_getDialogs req2 = new TLRPC.TL_messages_getDialogs();
@@ -12912,6 +12934,8 @@ public class MessagesController extends BaseController implements NotificationCe
                 if (error == null) {
                     resetDialogsAll = (TLRPC.messages_Dialogs) response;
                     resetDialogs(false, seq, newPts, date, qts);
+                } else {
+                    AndroidUtilities.runOnUIThread(this::cancelDialogsReset);
                 }
             });
         } else if (resetDialogsPinned != null && resetDialogsAll != null) {
