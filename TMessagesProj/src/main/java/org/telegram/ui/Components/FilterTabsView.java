@@ -70,6 +70,7 @@ import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Stories.recorder.HintView2;
 
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.Map;
 
 @SuppressLint("ViewConstructor")
@@ -293,6 +294,17 @@ public class FilterTabsView extends FrameLayout {
             setMeasuredDimension(w, MeasureSpec.getSize(heightMeasureSpec));
         }
 
+        // ZG perf: onDraw runs for every visible tab on every frame of the switch animation
+        // (setAnimationIdicatorProgress -> listView.invalidateViews()). These memoize the two
+        // per-frame allocations it used to make: the emoji colour filter and the counter string.
+        // Purely a cache - the produced values are bit-for-bit what the old code produced.
+        private int lastEmojiFilterColor;
+        private ColorFilter lastEmojiColorFilter;
+        private int counterTextCacheValue = Integer.MIN_VALUE;
+        private String counterTextCache;
+        private float counterTextCacheWidth;
+        private Locale counterTextCacheLocale;
+
         @SuppressLint("DrawAllocation")
         @Override
         protected void onDraw(@NonNull Canvas canvas) {
@@ -356,7 +368,12 @@ public class FilterTabsView extends FrameLayout {
                     textPaint.setColor(ColorUtils.blendARGB(color1, color2, animationValue));
                 }
             }
-            emojiColorFilter = new PorterDuffColorFilter(textPaint.getColor(), PorterDuff.Mode.SRC_IN);
+            final int emojiFilterColor = textPaint.getColor();
+            if (lastEmojiColorFilter == null || lastEmojiFilterColor != emojiFilterColor) {
+                lastEmojiFilterColor = emojiFilterColor;
+                lastEmojiColorFilter = new PorterDuffColorFilter(emojiFilterColor, PorterDuff.Mode.SRC_IN);
+            }
+            emojiColorFilter = lastEmojiColorFilter;
 
             float counterWidth;
             int countWidth;
@@ -367,12 +384,19 @@ public class FilterTabsView extends FrameLayout {
             boolean animateCounterReplace = animateFromTabCount > 0 && currentTab.counter > 0 && animateTabCounter;
 
             if (currentTab.counter > 0 || animateCounterRemove) {
-                if (animateCounterRemove) {
-                    counterText = String.format("%d", animateFromTabCount);
-                } else {
-                    counterText = String.format("%d", currentTab.counter);
+                final int counterValue = animateCounterRemove ? animateFromTabCount : currentTab.counter;
+                // String.format is kept (not Integer.toString) because LocaleController calls
+                // Locale.setDefault(), so "%d" renders locale digits for e.g. fa/ar. The locale is
+                // part of the cache key so a language change cannot leave a stale string behind.
+                final Locale locale = Locale.getDefault();
+                if (counterTextCache == null || counterTextCacheValue != counterValue || counterTextCacheLocale != locale) {
+                    counterTextCacheValue = counterValue;
+                    counterTextCacheLocale = locale;
+                    counterTextCache = String.format("%d", counterValue);
+                    counterTextCacheWidth = (int) Math.ceil(textCounterPaint.measureText(counterTextCache));
                 }
-                counterWidth = (int) Math.ceil(textCounterPaint.measureText(counterText));
+                counterText = counterTextCache;
+                counterWidth = counterTextCacheWidth;
                 countWidth = (int) Math.max(dp(TAB_COUNTER_HEIGHT - 10), counterWidth) + dp(10);
             } else {
                 counterText = null;
