@@ -2712,7 +2712,13 @@
     <string name="ZgRefreshRateAdaptive">Adaptive (system)</string>
     <string name="ZgRefreshRateMax">Maximum</string>
     <string name="ZgRefreshRateInfo">Adaptive lets Android choose the panel refresh rate and lower it on static screens. Maximum always requests the highest rate while ZG is on screen: smoother scrolling, noticeably more power on 90/120 Hz displays.</string>
-    <string name="ZgBatteryDefaultsInfo">Battery-saver defaults applied by ZG: balanced animation preset and power saving from 35% battery (Settings > Power Saving), photos only on mobile data and nothing while roaming (Settings > Data and Storage), repeat notifications off (Settings > Notifications). Every one of them can be changed in the screen named.</string>
+    <string name="ZgPerformanceClass">Device performance class</string>
+    <string name="ZgPerformanceClassAuto">Automatic</string>
+    <string name="ZgPerformanceClassLow">Low</string>
+    <string name="ZgPerformanceClassAverage">Average</string>
+    <string name="ZgPerformanceClassHigh">High</string>
+    <string name="ZgPerformanceClassInfo">ZG decides how much work the interface may do from the class it measures for this phone. Choosing a lower class is a one-switch calm mode: chat blur turns off, fewer threads decode animations, and several effects drop to cheaper versions. It does not affect messages, downloads or notifications.</string>
+    <string name="ZgBatteryDefaultsInfo">Battery-saver defaults applied by ZG: balanced animation preset with GIF autoplay and the animated spoiler effect off, power saving from 35% battery (Settings > Power Saving), photos only on mobile data, photos and small files on Wi-Fi with no video auto-download and no video, music or story preloading, nothing while roaming (Settings > Data and Storage), cache limited to 5 GB (Settings > Data and Storage > Storage Usage) and repeat notifications off (Settings > Notifications). Every one of them can be changed in the screen named.</string>
     <string name="ProxySettings">Proxy Settings</string>
     <string name="ProxyDetails">Proxy Details</string>
     <string name="Proxy">Proxy</string>
