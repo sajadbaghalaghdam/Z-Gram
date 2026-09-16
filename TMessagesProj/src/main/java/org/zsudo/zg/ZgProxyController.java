@@ -13,6 +13,7 @@ package org.zsudo.zg;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.SystemClock;
 import android.text.TextUtils;
 
 import org.telegram.messenger.AndroidUtilities;
@@ -62,6 +63,8 @@ public final class ZgProxyController {
     private volatile int boundPort;
     private volatile String lastError = "";
     private volatile boolean busy;
+    private volatile boolean notifyResumeUnsupported;
+    private volatile long lastResumeNotifyTime;
 
     private ZgProxyController() {
     }
@@ -221,6 +224,33 @@ public final class ZgProxyController {
     }
 
     // ---------------------------------------------------------------- lifecycle
+
+    /**
+     * ZG resume-latency: called from ConnectionsManager.setAppPaused(false) on the UI thread right
+     * before native_resumeNetwork, so the core can pre-dial a tunnel while tgnet is still waking
+     * up. No-op when the core is not running; a missing native symbol (older libzgcore.so) is
+     * logged once and then ignored. Debounced because several activities/accounts resume together.
+     */
+    public void onAppResumed() {
+        if (notifyResumeUnsupported || !isRunning()) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (lastResumeNotifyTime != 0 && now - lastResumeNotifyTime < 1000) {
+            return;
+        }
+        lastResumeNotifyTime = now;
+        try {
+            ZgCore.notifyResume();
+            if (BuildVars.LOGS_ENABLED) {
+                FileLog.d("ZG resume: core notified");
+            }
+        } catch (Throwable e) {
+            // UnsatisfiedLinkError when the core predates notifyResume, or anything the core threw.
+            notifyResumeUnsupported = true;
+            FileLog.e("ZG resume: notifyResume unavailable: " + e);
+        }
+    }
 
     /** Called once per process from ApplicationLoader.postInitApplication(). */
     public void onApplicationStart() {

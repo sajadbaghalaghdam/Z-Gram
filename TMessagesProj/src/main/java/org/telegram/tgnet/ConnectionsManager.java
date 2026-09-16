@@ -782,6 +782,8 @@ public class ConnectionsManager extends BaseController {
                 getContactsController().checkContacts();
             }
             lastPauseTime = 0;
+            // ZG resume-latency: give the tunnel core a head start (pre-dial) before tgnet reconnects.
+            org.zsudo.zg.ZgProxyController.getInstance().onAppResumed();
             native_resumeNetwork(currentAccount, false);
             // ZG resume-latency: TDLib forces a getDifference as soon as it goes online (Session.cpp
             // injects updatesTooLong on a new session, UpdatesManager fills gaps in 0.05-0.7 s). We
