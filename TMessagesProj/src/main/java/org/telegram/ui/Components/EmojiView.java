@@ -377,6 +377,22 @@ public class EmojiView extends FrameLayout implements
 
     private int currentPage;
 
+    /**
+     * ZG perf: the "selected_page" preference was read straight out of SharedPreferences on every
+     * keystroke by ChatActivityEnterView.onTextChanged (the branch taken whenever the emoji panel
+     * has not been created yet, which is most of a session). SharedPreferencesImpl.getInt() takes
+     * the instance lock, shared with every other prefs reader in the process.
+     * saveNewPage() below is the only writer of the key, so mirroring it here is exact.
+     */
+    private static int selectedPageCache = Integer.MIN_VALUE;
+
+    public static int getSelectedPage() {
+        if (selectedPageCache == Integer.MIN_VALUE) {
+            selectedPageCache = MessagesController.getGlobalEmojiSettings().getInt("selected_page", 0);
+        }
+        return selectedPageCache;
+    }
+
     private EmojiColorPickerWindow colorPickerView;
     private int emojiSize;
     private int location[] = new int[2];
@@ -2835,7 +2851,7 @@ public class EmojiView extends FrameLayout implements
                 Emoji.saveEmojiColors();
             }
         });
-        currentPage = MessagesController.getGlobalEmojiSettings().getInt("selected_page", 0);
+        currentPage = getSelectedPage();
 
         Emoji.loadRecentEmoji();
         emojiAdapter.notifyDataSetChanged();
@@ -5459,6 +5475,7 @@ public class EmojiView extends FrameLayout implements
         }
         if (currentPage != newPage) {
             currentPage = newPage;
+            selectedPageCache = newPage;
             MessagesController.getGlobalEmojiSettings().edit().putInt("selected_page", newPage).commit();
         }
     }
