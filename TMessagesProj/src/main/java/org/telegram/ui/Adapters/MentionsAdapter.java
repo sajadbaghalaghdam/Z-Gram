@@ -1172,11 +1172,25 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
             resultLength = result.length();
             foundType = 0;
         } else {
-            for (int a = searchPostion; a >= 0; a--) {
-                if (a >= text.length()) {
-                    continue;
-                }
+            // ZG perf: this backward scan used to grow `result` with result.insert(0, ch) on every
+            // iteration. StringBuilder.insert(0, ch) is a System.arraycopy of the whole buffer to
+            // make room at the front, so scanning L characters cost Theta(L^2) character moves.
+            // A plain sentence contains none of the trigger characters, so the scan runs all the
+            // way to index 0 and foundType stays -1 - about 125,000 character moves for a
+            // 500-character draft, on every keystroke, growing quadratically with the draft.
+            //
+            // Identical scan, identical breaks, identical indices; `result` is now built once at
+            // the end instead of incrementally. The two places the old loop inspected `result`
+            // mid-scan are rewritten in terms of indices, using the fact that at the top of the
+            // iteration for index `a` the old `result` held exactly text[a + 1 .. scanStart]:
+            //     result.length()  ==  scanStart - a
+            //     result.charAt(0) ==  text.charAt(a + 1)      (whenever scanStart - a > 0)
+            // scanStart replaces the old `if (a >= text.length()) continue;` skip-down.
+            final int scanStart = Math.min(searchPostion, text.length() - 1);
+            int foundIndex = -1;
+            for (int a = scanStart; a >= 0; a--) {
                 char ch = text.charAt(a);
+                final int resultLengthSoFar = scanStart - a;
                 if (a == 0 || text.charAt(a - 1) == ' ' || text.charAt(a - 1) == '\n' || ch == ':') {
                     if (ch == '@') {
                         if (searchInDialogs || (needUsernames || needBotContext && a == 0)) {
@@ -1190,7 +1204,8 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
                             dogPostion = a;
                             foundType = 0;
                             resultStartPosition = a;
-                            resultLength = result.length() + 1;
+                            resultLength = resultLengthSoFar + 1;
+                            foundIndex = a;
                             break;
                         }
                     } else if (ch == '#') {
@@ -1202,8 +1217,8 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
                         if (searchAdapterHelper.loadRecentHashtags()) {
                             foundType = 1;
                             resultStartPosition = a;
-                            resultLength = result.length() + 1;
-                            result.insert(0, ch);
+                            resultLength = resultLengthSoFar + 1;
+                            foundIndex = a;
                             break;
                         } else {
                             lastText = text;
@@ -1215,20 +1230,28 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
                     } else if (a == 0 && botInfo != null && ch == '/') {
                         foundType = 2;
                         resultStartPosition = a;
-                        resultLength = result.length() + 1;
+                        resultLength = resultLengthSoFar + 1;
+                        foundIndex = a;
                         break;
-                    } else if (ch == ':' && result.length() > 0) {
-                        boolean isNextPunctiationChar = punctuationsChars.indexOf(result.charAt(0)) >= 0;
-                        if (!isNextPunctiationChar || result.length() > 1) {
+                    } else if (ch == ':' && resultLengthSoFar > 0) {
+                        boolean isNextPunctiationChar = punctuationsChars.indexOf(text.charAt(a + 1)) >= 0;
+                        if (!isNextPunctiationChar || resultLengthSoFar > 1) {
                             foundType = 3;
                             resultStartPosition = a;
-                            resultLength = result.length() + 1;
+                            resultLength = resultLengthSoFar + 1;
+                            foundIndex = a;
                             break;
                         }
                     }
                 }
-                result.insert(0, ch);
             }
+            if (foundIndex >= 0) {
+                // '#' was the only branch that pushed its own trigger character into `result`
+                // (result.insert(0, ch) just before the break); the others left it out.
+                result.append(text, foundType == 1 ? foundIndex : foundIndex + 1, scanStart + 1);
+            }
+            // When the loop finishes without a break, foundType stays -1 and the method returns a
+            // few lines below without ever reading `result`, so it is deliberately left empty.
         }
         if (oldHintHashtag == null && hintHashtag != null) {
             notifyItemRangeInserted(0, 2);
