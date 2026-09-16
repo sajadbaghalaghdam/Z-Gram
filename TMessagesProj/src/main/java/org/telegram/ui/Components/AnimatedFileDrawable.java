@@ -51,6 +51,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 public final class AnimatedFileDrawable extends BitmapDrawable implements Animatable, BitmapsCache.Cacheable {
 
@@ -139,7 +140,28 @@ public final class AnimatedFileDrawable extends BitmapDrawable implements Animat
     private final BitmapsCache bitmapsCache;
     BitmapsCache.Metadata cacheMetadata;
 
-    private static final ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(8, new ThreadPoolExecutor.DiscardPolicy());
+    // ZG battery (G-05): eight-way parallel frame decode drags every cluster of a big.LITTLE SoC
+    // to a high DVFS point for a burst that three or four threads finish nearly as fast at much
+    // lower energy - the energy-per-instruction curve on the big cores is superlinear, so "race to
+    // sleep" stops paying once you race with all of them. Idle decode threads also used to live
+    // forever; they now retire after 30 s. Only zero-delay execute() is used on this pool, so the
+    // core-thread timeout cannot strand a scheduled task, and ThreadPoolExecutor keeps the last
+    // worker alive while the queue is non-empty.
+    private static final ScheduledThreadPoolExecutor executor = createDecodeExecutor();
+
+    private static ScheduledThreadPoolExecutor createDecodeExecutor() {
+        int poolSize = 3;
+        try {
+            if (SharedConfig.getDevicePerformanceClass() == SharedConfig.PERFORMANCE_CLASS_HIGH) {
+                poolSize = 4;
+            }
+        } catch (Throwable ignore) {
+        }
+        ScheduledThreadPoolExecutor result = new ScheduledThreadPoolExecutor(poolSize, new ThreadPoolExecutor.DiscardPolicy());
+        result.setKeepAliveTime(30, TimeUnit.SECONDS);
+        result.allowCoreThreadTimeOut(true);
+        return result;
+    }
 
     private final Runnable uiRunnableNoFrame = this::uiRunnableNoFrameImpl;
 
