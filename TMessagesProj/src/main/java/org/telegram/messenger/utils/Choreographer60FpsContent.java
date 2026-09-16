@@ -9,7 +9,9 @@ import android.util.SparseArray;
 
 import androidx.annotation.Nullable;
 
+import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildConfig;
+import org.telegram.ui.Components.ForegroundDetector;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -74,6 +76,12 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
     /** Counts dispatched 60fps frames; used for legacy 30fps drawable support. */
     private int mCounter;
 
+    /** True while a {@link Choreographer} frame callback is pending. */
+    private boolean mScheduled;
+
+    /** True while the app has no started activities; VSYNC is not re-armed in that state. */
+    private boolean mInBackground;
+
     // ── Public interface ──────────────────────────────────────────────────────
 
     /** Callback interface, mirrors {@link Choreographer.FrameCallback}. */
@@ -93,21 +101,25 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
     public void post(FrameCallback callback) {
         checkMainThread();
         mOneShot.add(callback);
+        ensureScheduled();
     }
 
     public void postInvalidateDrawable(Drawable drawable) {
         checkMainThread();
         mDrawablesToInvalidate.add(drawable);
+        ensureScheduled();
     }
 
     public void postInvalidateDrawable30fps(Drawable drawable) {
         checkMainThread();
         mDrawablesToInvalidate30fps.add(drawable);
+        ensureScheduled();
     }
 
     public void postInvalidateView(View view) {
         checkMainThread();
         mViewsToInvalidate.add(view);
+        ensureScheduled();
     }
 
     /**
@@ -136,6 +148,7 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
             group.runnableCallbacksOnce = new ReferenceList<>();
         }
         group.runnableCallbacksOnce.add(callback);
+        ensureScheduled();
     }
 
 
@@ -153,6 +166,7 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
         fps = Math.max(1, Math.min(fps, TARGET_FPS));
         removeFrameCallback(callback); // remove from any existing group first
         getOrCreateGroup(fps).runnableCallbacks.add(callback);
+        ensureScheduled();
     }
 
     /**
@@ -170,6 +184,7 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
         fps = Math.max(1, Math.min(fps, TARGET_FPS));
         removeFrameCallback(callback); // remove from any existing group first
         getOrCreateGroup(fps).callbacks.add(callback);
+        ensureScheduled();
     }
 
     /**
@@ -222,7 +237,29 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
     // ── Private implementation ────────────────────────────────────────────────
 
     private Choreographer60FpsContent() {
-        mChoreographer.postFrameCallback(this);
+        // ZG battery (F-01): VSYNC is armed on demand (see ensureScheduled) instead of
+        // unconditionally for the whole process lifetime, and is released while the app
+        // has no started activities.
+        ForegroundDetector detector = ForegroundDetector.getInstance();
+        if (detector != null) {
+            mInBackground = detector.isBackground();
+            detector.addListener(new ForegroundDetector.Listener() {
+                @Override
+                public void onBecameForeground() {
+                    AndroidUtilities.runOnUIThread(() -> {
+                        mInBackground = false;
+                        if (hasWork()) {
+                            ensureScheduled();
+                        }
+                    });
+                }
+
+                @Override
+                public void onBecameBackground() {
+                    AndroidUtilities.runOnUIThread(() -> mInBackground = true);
+                }
+            });
+        }
     }
 
     @Override
@@ -239,7 +276,44 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
             }
         }
 
+        if (!mInBackground && hasWork()) {
+            mChoreographer.postFrameCallback(this);
+        } else {
+            mScheduled     = false;
+            mLastVsyncNs   = 0;
+            mAccumulatedNs = 0;
+        }
+    }
+
+    /** Arms a VSYNC callback if one is not already pending. Cheap to call on every mutation. */
+    private void ensureScheduled() {
+        if (mScheduled || mInBackground) {
+            return;
+        }
+        mScheduled     = true;
+        mLastVsyncNs   = 0;
+        mAccumulatedNs = 0;
         mChoreographer.postFrameCallback(this);
+    }
+
+    /**
+     * Returns whether any callback, view or drawable is waiting for a tick.
+     * Also drops groups that have no live members, so an idle dispatcher really stops.
+     * Must not be called while {@link #dispatchFrame} is iterating {@code mGroups}.
+     */
+    private boolean hasWork() {
+        for (int i = mGroups.size() - 1; i >= 0; i--) {
+            CallbackGroup group = mGroups.valueAt(i);
+            if (group.callbacks.isEmpty() && group.runnableCallbacks.isEmpty()
+                    && (group.runnableCallbacksOnce == null || group.runnableCallbacksOnce.isEmpty())) {
+                mGroups.removeAt(i);
+            }
+        }
+        return mGroups.size() > 0
+                || !mOneShot.isEmpty()
+                || !mDrawablesToInvalidate.isEmpty()
+                || !mDrawablesToInvalidate30fps.isEmpty()
+                || !mViewsToInvalidate.isEmpty();
     }
 
     private void dispatchFrame(long frameTimeNanos) {
