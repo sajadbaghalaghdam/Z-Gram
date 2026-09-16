@@ -451,6 +451,31 @@ public class ChatActivityEnterView extends FrameLayout implements
     public NumberTextView captionLimitView;
     private int currentLimit = -1;
     private int codePointCount;
+    private CharSequence codePointCountText;
+    private boolean codePointCountDirty;
+
+    /**
+     * ZG perf: the message text changed, so the cached code-point count is stale. The O(N) scan
+     * itself is deferred to {@link #getCodePointCount()}; in a normal chat nothing reads it
+     * (every consumer sits behind `currentLimit > 0` or `editingCaption`) so it never runs.
+     * Called from afterTextChanged at exactly the point the eager scan used to sit, and every
+     * text change fires afterTextChanged, so a lazily computed value is the value the eager scan
+     * would have produced.
+     */
+    private void invalidateCodePointCount(CharSequence text) {
+        codePointCountText = text;
+        codePointCountDirty = true;
+    }
+
+    private int getCodePointCount() {
+        if (codePointCountDirty) {
+            codePointCountDirty = false;
+            final CharSequence text = codePointCountText;
+            codePointCount = text == null ? 0 : Character.codePointCount(text, 0, text.length());
+        }
+        return codePointCount;
+    }
+
     private CrossOutDrawable notifySilentDrawable;
 
     private Runnable moveToSendStateRunnable;
@@ -3571,7 +3596,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             if (currentLimit != newLimit) {
                 currentLimit = newLimit;
                 int beforeLimit;
-                if (currentLimit > 0 && (beforeLimit = currentLimit - codePointCount) <= (isLiveComment ? 5 : 100)) {
+                if (currentLimit > 0 && (beforeLimit = currentLimit - getCodePointCount()) <= (isLiveComment ? 5 : 100)) {
                     if (beforeLimit < -9999) {
                         beforeLimit = -9999;
                     }
@@ -5906,8 +5931,11 @@ public class ChatActivityEnterView extends FrameLayout implements
                         onLineCountChanged(lineCount, messageEditText.getLineCount());
                     }
                     lineCount = messageEditText.getLineCount();
-                    showAiButton(lineCount > 2 && charSequence != null && !TextUtils.isEmpty(charSequence.toString().trim()));
-                    showRichButton(lineCount > 2 && charSequence != null && !TextUtils.isEmpty(charSequence.toString().trim()));
+                    // ZG perf: was charSequence.toString().trim() twice - two full copies of the
+                    // draft per keystroke to answer "is there a non-space character in it".
+                    final boolean hasContent = AndroidUtilities.hasNonSpace(charSequence);
+                    showAiButton(lineCount > 2 && hasContent);
+                    showRichButton(lineCount > 2 && hasContent);
                 } else {
                     heightShouldBeChanged = false;
                 }
@@ -5920,7 +5948,12 @@ public class ChatActivityEnterView extends FrameLayout implements
                 }
                 isPaste = false;
                 checkSendButton(true);
-                CharSequence message = AndroidUtilities.getTrimmedString(charSequence.toString());
+                // ZG perf: was `CharSequence message = AndroidUtilities.getTrimmedString(charSequence.toString());`
+                // - a full copy of the draft, then getTrimmedString() peeling one character at a
+                // time via subSequence() (another full copy per leading space) - and the only thing
+                // the result was ever used for is the `length() != 0` test further down. Evaluated
+                // at the same point in the method so the observed value cannot differ.
+                final boolean hasTypingText = !AndroidUtilities.isTrimmedStringEmpty(charSequence);
                 if (delegate != null) {
                     if (!ignoreTextChange) {
                         if (before > count + 1 || (count - before) > 2 || TextUtils.isEmpty(charSequence)) {
@@ -5932,7 +5965,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 if (innerTextChange != 2 && (count - before) > 1) {
                     processChange = true;
                 }
-                if (editingMessageObject == null && !canWriteToChannel && message.length() != 0 && lastTypingTimeSend < System.currentTimeMillis() - 5000 && !ignoreTextChange) {
+                if (editingMessageObject == null && !canWriteToChannel && hasTypingText && lastTypingTimeSend < System.currentTimeMillis() - 5000 && !ignoreTextChange) {
                     lastTypingTimeSend = System.currentTimeMillis();
                     if (delegate != null) {
                         delegate.needSendTyping();
@@ -5969,9 +6002,13 @@ public class ChatActivityEnterView extends FrameLayout implements
                 }
 
                 int beforeLimit;
-                codePointCount = Character.codePointCount(editable, 0, editable.length());
+                // ZG perf: was an unconditional O(N) Character.codePointCount() scan over the whole
+                // editable on every keystroke. Every consumer of the value is behind either
+                // `currentLimit > 0` or `editingCaption`, neither of which holds in a normal chat,
+                // so the scan is deferred to the first read instead (see getCodePointCount()).
+                invalidateCodePointCount(editable);
                 boolean doneButtonEnabledLocal = true;
-                if (currentLimit > 0 && (beforeLimit = currentLimit - codePointCount) <= (isLiveComment ? 5 : 100)) {
+                if (currentLimit > 0 && (beforeLimit = currentLimit - getCodePointCount()) <= (isLiveComment ? 5 : 100)) {
                     if (beforeLimit < -9999) {
                         beforeLimit = -9999;
                     }
@@ -6011,7 +6048,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 }
                 checkBotMenu();
 
-                if (editingCaption && !captionLimitBulletinShown && !MessagesController.getInstance(currentAccount).premiumFeaturesBlocked() && !UserConfig.getInstance(currentAccount).isPremium() && codePointCount > MessagesController.getInstance(currentAccount).captionLengthLimitDefault && codePointCount < MessagesController.getInstance(currentAccount).captionLengthLimitPremium) {
+                if (editingCaption && !captionLimitBulletinShown && !MessagesController.getInstance(currentAccount).premiumFeaturesBlocked() && !UserConfig.getInstance(currentAccount).isPremium() && getCodePointCount() > MessagesController.getInstance(currentAccount).captionLengthLimitDefault && getCodePointCount() < MessagesController.getInstance(currentAccount).captionLengthLimitPremium) {
                     captionLimitBulletinShown = true;
                     if (heightShouldBeChanged) {
                         AndroidUtilities.runOnUIThread(() -> showCaptionLimitBulletin(), 300);
@@ -6020,9 +6057,11 @@ public class ChatActivityEnterView extends FrameLayout implements
                     }
                 }
 
-                showAiButton(lineCount > 2 && editable != null && !TextUtils.isEmpty(editable.toString().trim()));
+                // ZG perf: was editable.toString().trim() twice - two more full copies per keystroke.
+                final boolean hasContent = AndroidUtilities.hasNonSpace(editable);
+                showAiButton(lineCount > 2 && hasContent);
                 checkIsEphemeralMessage(true);
-                showRichButton(lineCount > 2 && editable != null && !TextUtils.isEmpty(editable.toString().trim()));
+                showRichButton(lineCount > 2 && hasContent);
             }
         });
         messageEditText.addTextChangedListener(new EditTextSuggestionsFix());
@@ -6906,7 +6945,13 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     private void checkIsEphemeralMessage(boolean animated) {
-        final String text = getEditText() != null ? getEditText().toString() : null;
+        // ZG perf: this is called from afterTextChanged, so it ran a full editable.toString() copy
+        // of the draft on every keystroke. EphemeralMessagesHelper.getEphemeralCommandBotId() bails
+        // out immediately unless the text starts with '/' and is at least 2 characters long, so
+        // that test is done on the CharSequence and the copy is only made when it can matter -
+        // passing null otherwise yields exactly the same answer (0 -> false).
+        final Editable editable = getEditText();
+        final String text = editable != null && editable.length() >= 2 && editable.charAt(0) == '/' ? editable.toString() : null;
         final boolean isEphemeralVisible = dialog_id < 0 && isChat && editingMessageObject == null && (
             EphemeralMessagesHelper.getInstance(currentAccount).isEphemeralCommand(text, lastBotInfo)
                 || replyingMessageObject != null && replyingMessageObject.isEphemeral()
@@ -7582,7 +7627,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             return;
         }
 
-        if (currentLimit - codePointCount < 0) {
+        if (currentLimit - getCodePointCount() < 0) {
             if (captionLimitView != null) {
                 AndroidUtilities.shakeViewSpring(captionLimitView, 3.5f);
                 try {
@@ -7618,7 +7663,7 @@ public class ChatActivityEnterView extends FrameLayout implements
             }
         }
 
-        if (currentLimit - codePointCount < 0) {
+        if (currentLimit - getCodePointCount() < 0) {
             if (captionLimitView != null) {
                 AndroidUtilities.shakeViewSpring(captionLimitView, 3.5f);
                 try {
@@ -7626,7 +7671,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 } catch (Exception ignored) {}
             }
 
-            if (!MessagesController.getInstance(currentAccount).premiumFeaturesBlocked() && MessagesController.getInstance(currentAccount).captionLengthLimitPremium > codePointCount) {
+            if (!MessagesController.getInstance(currentAccount).premiumFeaturesBlocked() && MessagesController.getInstance(currentAccount).captionLengthLimitPremium > getCodePointCount()) {
                 showCaptionLimitBulletin();
             }
             return;
@@ -10359,7 +10404,7 @@ public class ChatActivityEnterView extends FrameLayout implements
         }
 
         if (captionLimitView != null && messageEditText != null) {
-            if (codePointCount - currentLimit < 0) {
+            if (getCodePointCount() - currentLimit < 0) {
                 captionLimitView.setTextColor(getThemedColor(Theme.key_text_RedRegular));
             } else {
                 captionLimitView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText));
