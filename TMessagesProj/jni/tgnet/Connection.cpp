@@ -380,7 +380,14 @@ void Connection::connect() {
             setTimeout(25);
         }
     } else {
-        if (isTryingNextPort) {
+        // ZG resume-latency: right after a resume / network change the path is very likely stale
+        // (dead NAT mapping through the local tunnel). Give the first couple of attempts a short
+        // budget so the ladder is 5+0.3+5 instead of 12+1+8; then fall back to stock values so a
+        // genuinely slow network is not churned (battery).
+        if (fastConnectAttempts > 0) {
+            fastConnectAttempts--;
+            setTimeout(FAST_CONNECT_TIMEOUT);
+        } else if (isTryingNextPort) {
             setTimeout(8);
         } else {
             setTimeout(12);
@@ -428,6 +435,12 @@ void Connection::resetReconnectTimeout() {
     // evidence that a connect attempt is worth making now, so drop any accumulated backoff and
     // fire a pending reconnect timer right away instead of waiting it out.
     lastReconnectTimeout = 100;
+    // ZG resume-latency: arm a bounded number of short-budget attempts for the sockets that carry
+    // messages. Push keeps its long, battery-friendly budget (30/20 s) and upload/download never
+    // consume the counter, so it is only armed for the types that do (see connect()).
+    if (connectionType == ConnectionTypeGeneric || connectionType == ConnectionTypeTemp || connectionType == ConnectionTypeGenericMedia) {
+        fastConnectAttempts = FAST_CONNECT_ATTEMPTS;
+    }
     if (waitForReconnectTimer) {
         reconnectTimer->stop();
         waitForReconnectTimer = false;
@@ -703,7 +716,11 @@ void Connection::onDisconnectedInternal(int32_t reason, int32_t error) {
         }
         if (ConnectionsManager::getInstance(currentDatacenter->instanceNum).isNetworkAvailable() && connectionType != ConnectionTypeProxy) {
             isTryingNextPort = true;
-            if (failedConnectionCount > willRetryConnectCount || switchToNextPort) {
+            // ZG resume-latency: with a proxy, "next address" means the tunnel must dial a *different*
+            // upstream endpoint - counter-productive while we are still probing a stale tunnel, so
+            // hold the address for the remaining fast attempts.
+            bool holdAddress = fastConnectAttempts > 0 && !ConnectionsManager::getInstance(currentDatacenter->instanceNum).proxyAddress.empty();
+            if (!holdAddress && (failedConnectionCount > willRetryConnectCount || switchToNextPort)) {
                 currentDatacenter->nextAddressOrPort(currentAddressFlags);
                 if (currentDatacenter->isRepeatCheckingAddresses() && (ConnectionsManager::getInstance(currentDatacenter->instanceNum).getIpStratagy() == USE_IPV4_ONLY || ConnectionsManager::getInstance(currentDatacenter->instanceNum).getIpStratagy() == USE_IPV6_ONLY)) {
                     if (LOGS_ENABLED) DEBUG_D("started retrying connection, set ipv4 ipv6 random strategy");
@@ -740,7 +757,10 @@ void Connection::onDisconnectedInternal(int32_t reason, int32_t error) {
             waitForReconnectTimer = false;
             if (connectionType == ConnectionTypeGenericMedia && currentDatacenter->isHandshaking(true) || connectionType == ConnectionTypeGeneric && (currentDatacenter->isHandshaking(false) || datacenterId == ConnectionsManager::getInstance(currentDatacenter->instanceNum).currentDatacenterId || datacenterId == ConnectionsManager::getInstance(currentDatacenter->instanceNum).movingToDatacenterId)) {
                 if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) reconnect %s:%hu", this, currentDatacenter->instanceNum, currentDatacenter->getDatacenterId(), connectionType, hostAddress.c_str(), hostPort);
-                reconnectTimer->setTimeout(1000, false);
+                // ZG resume-latency: in the foreground on the current DC, 1 s of dead air per attempt
+                // is the single biggest chunk of the resume stall; 300 ms while in the fast window.
+                bool foreground = ConnectionsManager::getInstance(currentDatacenter->instanceNum).lastPauseTime == 0;
+                reconnectTimer->setTimeout((foreground && fastConnectAttempts > 0) ? FAST_RECONNECT_DELAY : 1000, false);
                 reconnectTimer->start();
             }
         }

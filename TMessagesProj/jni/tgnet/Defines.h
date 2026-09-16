@@ -27,6 +27,13 @@
 #define DOWNLOAD_CONNECTIONS_COUNT 2
 #define UPLOAD_CONNECTIONS_COUNT 4
 #define CONNECTION_BACKGROUND_KEEP_TIME 10000
+// ZG resume-latency: bounded "fast" connect ladder for generic/temp/genericMedia sockets right after
+// a resume or a network change (see Connection::connect / resetReconnectTimeout). Push keeps its
+// stock 30/20 s budget so the notification path is untouched.
+#define FAST_CONNECT_TIMEOUT 5          // s, connect budget for the first FAST_CONNECT_ATTEMPTS attempts
+#define FAST_CONNECT_ATTEMPTS 2
+#define FAST_RECONNECT_DELAY 300        // ms, foreground generic reconnect gap inside the fast window (stock 1000)
+#define RESUME_PONG_TIMEOUT 3000        // ms, generic/push liveness probe deadline after a foreground resume
 #define MAX_ACCOUNT_COUNT 5
 #define USE_DELEGATE_HOST_RESOLVE
 

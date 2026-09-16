@@ -99,6 +99,7 @@ private:
     bool waitForReconnectTimer = false;
     bool connectionInProcess = false;
     uint32_t lastReconnectTimeout = 100;
+    uint8_t fastConnectAttempts = 0;   // ZG resume-latency: >0 => next connect() uses FAST_CONNECT_TIMEOUT
     int64_t usefullDataReceiveTime;
     uint32_t currentTimeout = 4;
     uint32_t receivedDataAmount = 0;
