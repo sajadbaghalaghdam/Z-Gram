@@ -255,6 +255,10 @@ public class DownloadController extends BaseController implements NotificationCe
         return localInstance;
     }
 
+    // ZG battery (F-11 / G-03): bump when the fork auto-download defaults below change and they
+    // should be re-applied over whatever is stored. See the migration at the end of the constructor.
+    private static final int ZG_AUTODOWNLOAD_DEFAULTS_VERSION = 1;
+
     public DownloadController(int instance) {
         super(instance);
         SharedPreferences preferences = MessagesController.getMainSettings(currentAccount);
@@ -335,6 +339,27 @@ public class DownloadController extends BaseController implements NotificationCe
             editor.putInt("currentWifiPreset", currentWifiPreset = 3);
             editor.putInt("currentRoamingPreset", currentRoamingPreset = 3);
             editor.commit();
+        }
+
+        // ZG battery (F-11 / G-03): loadAutoDownloadConfig() writes all three presets back to
+        // preferences verbatim on every server config fetch, without the user ever touching a
+        // setting. So on any install that has run before, the stored strings always win and a
+        // changed default above would never actually reach the user. Apply the fork defaults
+        // exactly once, recorded by a version counter, and never again - after this anything the
+        // user picks in Settings > Data and Storage sticks, including turning it all back on.
+        if (preferences.getInt("zgAutoDownloadDefaultsVersion", 0) < ZG_AUTODOWNLOAD_DEFAULTS_VERSION) {
+            mobilePreset = new Preset(zgDefaultMobile, zgDefaultMobile);
+            wifiPreset = new Preset(zgDefaultWifi, zgDefaultWifi);
+            roamingPreset = new Preset(zgDefaultRoaming, zgDefaultRoaming);
+            preferences.edit()
+                    .putString("mobilePreset", mobilePreset.toString())
+                    .putString("wifiPreset", wifiPreset.toString())
+                    .putString("roamingPreset", roamingPreset.toString())
+                    .putInt("currentMobilePreset", currentMobilePreset = 3)
+                    .putInt("currentWifiPreset", currentWifiPreset = 3)
+                    .putInt("currentRoamingPreset", currentRoamingPreset = 3)
+                    .putInt("zgAutoDownloadDefaultsVersion", ZG_AUTODOWNLOAD_DEFAULTS_VERSION)
+                    .apply();
         }
 
         AndroidUtilities.runOnUIThread(() -> {
