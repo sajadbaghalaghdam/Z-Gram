@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ZG: overrides the library's Telegram-blue gradient. Sampled from the logo's own
+     outer ring so the adaptive mask blends into the artwork at any mask shape. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#0C0706" />
+</shape>
