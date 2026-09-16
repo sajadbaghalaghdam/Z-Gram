@@ -115,6 +115,7 @@ public class ConnectionsManager extends BaseController {
     public final static int DEFAULT_DATACENTER_ID = Integer.MAX_VALUE;
 
     private long lastPauseTime = System.currentTimeMillis();
+    private long lastResumeDifferenceTime; // ZG resume-latency: last getDifference() forced by setAppPaused(false)
     private boolean appPaused = true;
     private boolean isUpdating;
     private int connectionState;
@@ -782,6 +783,24 @@ public class ConnectionsManager extends BaseController {
             }
             lastPauseTime = 0;
             native_resumeNetwork(currentAccount, false);
+            // ZG resume-latency: TDLib forces a getDifference as soon as it goes online (Session.cpp
+            // injects updatesTooLong on a new session, UpdatesManager fills gaps in 0.05-0.7 s). We
+            // otherwise wait for new_session_created or a 1500 ms gap timer on a 1 Hz tick. Cheap when
+            // nothing changed (updates.differenceEmpty), and it also queues a request that drives the
+            // generic connect immediately. Debounced: onResume can fire several times in a row.
+            if (Math.abs(System.currentTimeMillis() - lastResumeDifferenceTime) > 5000) {
+                lastResumeDifferenceTime = System.currentTimeMillis();
+                final int account = currentAccount;
+                Utilities.stageQueue.postRunnable(() -> {
+                    AccountInstance accountInstance = AccountInstance.getInstance(account);
+                    if (accountInstance.getUserConfig().isClientActivated()) {
+                        if (BuildVars.LOGS_ENABLED) {
+                            FileLog.d("ZG resume: getDifference on resume account" + account);
+                        }
+                        accountInstance.getMessagesController().getDifference();
+                    }
+                });
+            }
         }
     }
 
