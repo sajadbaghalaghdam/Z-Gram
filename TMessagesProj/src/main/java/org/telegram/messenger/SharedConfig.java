@@ -1184,6 +1184,12 @@ public class SharedConfig {
         editor.apply();
     }
 
+    // ZG battery: the ZG settings screen exposes this, so it needs to read the stored override
+    // (-1 = automatic) without re-measuring the device.
+    public static int getOverrideDevicePerformanceClass() {
+        return overrideDevicePerformanceClass;
+    }
+
     public static void overrideDevicePerformanceClass(int performanceClass) {
         MessagesController.getGlobalMainSettings().edit().putInt("overrideDevicePerformanceClass", overrideDevicePerformanceClass = performanceClass).remove("lite_mode").apply();
         if (liteMode != null) {
