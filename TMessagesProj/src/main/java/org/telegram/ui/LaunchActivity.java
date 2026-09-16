@@ -6975,6 +6975,11 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         MediaController.getInstance().setFeedbackView(feedbackView = actionBarLayout.getView(), true);
         ApplicationLoader.mainInterfacePaused = false;
         MessagesController.getInstance(currentAccount).sortDialogs(null);
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            if (UserConfig.getInstance(a).isClientActivated()) {
+                MessagesController.getInstance(a).checkAppConfigOnResume();
+            }
+        }
         showLanguageAlert(false);
         Utilities.stageQueue.postRunnable(() -> {
             ApplicationLoader.mainInterfacePausedStageQueue = false;

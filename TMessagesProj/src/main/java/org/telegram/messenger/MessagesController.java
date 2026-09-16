@@ -2643,6 +2643,14 @@ public class MessagesController extends BaseController implements NotificationCe
 
     private Runnable loadAppConfigRunnable = this::loadAppConfig;
 
+    // ZG battery (F-05): help.getAppConfig used to be polled every 4 minutes forever, per account.
+    // Each poll is an RPC that un-pauses the native network layer and promotes the radio. App config
+    // changes rarely, so poll every 30 min in the foreground, every 6 h in the background, and
+    // refresh on resume when the last check is older than the foreground period.
+    private static final long APP_CONFIG_FOREGROUND_PERIOD = 30 * 60 * 1000L;
+    private static final long APP_CONFIG_BACKGROUND_PERIOD = 6 * 60 * 60 * 1000L;
+    private long lastAppConfigCheckTime;
+
     public void loadAppConfig() {
         loadAppConfig(true);
     }
@@ -2656,9 +2664,30 @@ public class MessagesController extends BaseController implements NotificationCe
             if (config != null && config.config instanceof TLRPC.TL_jsonObject) {
                 applyAppConfig((TLRPC.TL_jsonObject) config.config);
             }
-            AndroidUtilities.cancelRunOnUIThread(loadAppConfigRunnable);
-            AndroidUtilities.runOnUIThread(loadAppConfigRunnable, 4 * 60 * 1000 + 10);
+            lastAppConfigCheckTime = SystemClock.elapsedRealtime();
+            scheduleAppConfigReload(ApplicationLoader.mainInterfacePaused ? APP_CONFIG_BACKGROUND_PERIOD : APP_CONFIG_FOREGROUND_PERIOD);
         }));
+    }
+
+    private void scheduleAppConfigReload(long delay) {
+        AndroidUtilities.cancelRunOnUIThread(loadAppConfigRunnable);
+        AndroidUtilities.runOnUIThread(loadAppConfigRunnable, delay);
+    }
+
+    /**
+     * Called when the main interface comes to the foreground: fetches the app config if the last
+     * check is older than the foreground period, otherwise re-arms the timer on the foreground cadence.
+     */
+    public void checkAppConfigOnResume() {
+        if (lastAppConfigCheckTime == 0) {
+            return; // initial load still pending
+        }
+        long elapsed = Math.abs(SystemClock.elapsedRealtime() - lastAppConfigCheckTime);
+        if (elapsed >= APP_CONFIG_FOREGROUND_PERIOD) {
+            loadAppConfig();
+        } else {
+            scheduleAppConfigReload(APP_CONFIG_FOREGROUND_PERIOD - elapsed);
+        }
     }
 
     private void applyAppConfig(TLRPC.TL_jsonObject object) {
