@@ -99,6 +99,7 @@ private:
     void wakeup();
     void processServerResponse(TLObject *message, int64_t messageId, int32_t messageSeqNo, int64_t messageSalt, Connection *connection, int64_t innerMsgId, int64_t containerMessageId);
     void sendPing(Datacenter *datacenter, bool usePushConnection);
+    void sendResumeProbes();
     void sendMessagesToConnection(std::vector<std::unique_ptr<NetworkMessage>> &messages, Connection *connection, bool reportAck);
     void sendMessagesToConnectionWithConfirmation(std::vector<std::unique_ptr<NetworkMessage>> &messages, Connection *connection, bool reportAck);
     void requestSaltsForDatacenter(Datacenter *datacenter, bool media, bool useTempConnection);
@@ -161,6 +162,11 @@ private:
     int64_t sendingPushPingTime = 0;
     bool sendingPushPing = false;
     bool sendingPing = false;
+    // ZG resume-latency: liveness probe of the generic socket sent from resumeNetwork(false).
+    int64_t resumePingTime = 0;              // monotonic ms when the probe ping went out
+    bool resumePingPending = false;          // true until its pong, the socket closing, or the watchdog
+    int32_t resumePingId = 0;                // ping_id of the probe (lastPingId is shared with push pings)
+    uint32_t resumePingConnectionToken = 0;  // token of the generic connection that sent it
     bool updatingDcSettings = false;
     bool updatingDcSettingsAgain = false;
     uint32_t updatingDcSettingsAgainDcNum = 0;

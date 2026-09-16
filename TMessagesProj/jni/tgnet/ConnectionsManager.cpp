@@ -245,6 +245,23 @@ void ConnectionsManager::select() {
         }
     }
 
+    // ZG resume-latency: no pong within RESUME_PONG_TIMEOUT after a foreground resume => the generic
+    // socket is a zombie (half-open through the tunnel). Force a new one now instead of waiting for
+    // the 12 s ConnectionSocket::checkTimeout. Only the connection that sent the probe is touched
+    // (token snapshot), and only while still in the foreground with a network.
+    if (resumePingPending && llabs(now - resumePingTime) >= RESUME_PONG_TIMEOUT) {
+        resumePingPending = false;
+        if (datacenter != nullptr && lastPauseTime == 0 && networkAvailable && resumePingConnectionToken != 0) {
+            Connection *generic = datacenter->getGenericConnection(false, 0);
+            if (generic != nullptr && generic->getConnectionToken() == resumePingConnectionToken) {
+                if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) resume probe: no pong in %" PRId64 " ms, reconnecting", generic, instanceNum, datacenter->getDatacenterId(), generic->getConnectionType(), now - resumePingTime);
+                generic->suspendConnection(true);
+                generic->connect();
+            }
+        }
+        resumePingConnectionToken = 0;
+    }
+
     if (lastPauseTime != 0 && llabs(now - lastPauseTime) >= nextSleepTimeout) {
         bool dontSleep = !requestingSaltsForDc.empty();
         if (!dontSleep) {
@@ -704,6 +721,7 @@ void ConnectionsManager::onConnectionClosed(Connection *connection, int reason) 
     if (connection->getConnectionType() == ConnectionTypeGeneric) {
         if (datacenter->getDatacenterId() == currentDatacenterId) {
             sendingPing = false;
+            resumePingPending = false;
             if (!connection->isSuspended() && (proxyAddress.empty() || connection->hasTlsHashMismatch())) {
                 if (reason == 2) {
                     disconnectTimeoutAmount += connection->getTimeout();
@@ -811,6 +829,7 @@ void ConnectionsManager::onConnectionConnected(Connection *connection) {
         } else {
             if (connectionType == ConnectionTypeGeneric && datacenter->getDatacenterId() == currentDatacenterId) {
                 sendingPing = false;
+                resumePingPending = false;
             }
             if (networkPaused && lastPauseTime != 0) {
                 lastPauseTime = getCurrentTimeMonotonicMillis();
@@ -1182,6 +1201,11 @@ void ConnectionsManager::processServerResponse(TLObject *message, int64_t messag
             sendingPushPing = false;
         } else {
             auto response = (TL_pong *) message;
+            if (resumePingPending && response->ping_id == resumePingId) {
+                // ZG resume-latency: the probe was answered, the generic socket is alive.
+                if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) resume probe: pong after %" PRId64 " ms", connection, instanceNum, datacenter->getDatacenterId(), connection->getConnectionType(), getCurrentTimeMonotonicMillis() - resumePingTime);
+                resumePingPending = false;
+            }
             if (response->ping_id >= 2000000) {
                 for (auto iter = proxyActiveChecks.begin(); iter != proxyActiveChecks.end(); iter++) {
                     ProxyCheckInfo *proxyCheckInfo = iter->get();
@@ -3831,8 +3855,57 @@ void ConnectionsManager::resumeNetwork(bool partial) {
                     datacenter.second->createGenericMediaConnection()->connect();
                 }
             }
+            if (!partial) {
+                sendResumeProbes();
+            }
         }
     });
+}
+
+void ConnectionsManager::sendResumeProbes() {
+    // ZG resume-latency (mirrors TDLib SessionConnection::set_online). Network thread, foreground
+    // resume only (lastPauseTime == 0): nothing here runs on the background / partial-wakeup path.
+    // 1) generic socket survived the background => ping it *now* and arm a RESUME_PONG_TIMEOUT
+    //    watchdog (select()); did not survive => create+connect it immediately instead of waiting
+    //    for the ping cadence in select() or for the first Java request.
+    // 2) push socket with an unanswered ping older than RESUME_PONG_TIMEOUT => it is very likely
+    //    dead (today that is only noticed 30 s after the ping); drop it so select() reconnects and
+    //    re-pings on the next loop. This can only make notifications earlier.
+    resumePingPending = false;
+    resumePingConnectionToken = 0;
+    if (lastPauseTime != 0 || networkPaused || !networkAvailable) {
+        return;
+    }
+    Datacenter *datacenter = getDatacenterWithId(currentDatacenterId);
+    if (datacenter == nullptr) {
+        return;
+    }
+    int64_t now = getCurrentTimeMonotonicMillis();
+    if (datacenter->hasAuthKey(ConnectionTypeGeneric, 1)) {
+        Connection *generic = datacenter->getGenericConnection(false, 0);
+        bool wasConnected = generic != nullptr && generic->getConnectionToken() != 0;
+        lastPingTime = now;
+        sendPing(datacenter, false);
+        if (wasConnected && sendingPing) {
+            resumePingPending = true;
+            resumePingTime = now;
+            resumePingId = lastPingId;
+            resumePingConnectionToken = generic->getConnectionToken();
+            if (LOGS_ENABLED) DEBUG_D("connection(%p, account%u, dc%u, type %d) resume probe: ping sent, token %u", generic, instanceNum, datacenter->getDatacenterId(), generic->getConnectionType(), resumePingConnectionToken);
+        } else {
+            if (LOGS_ENABLED) DEBUG_D("account%u dc%u resume probe: generic connection not up, connecting now", instanceNum, datacenter->getDatacenterId());
+        }
+    }
+    if (pushConnectionEnabled && sendingPushPing && llabs(now - lastPushPingTime) >= RESUME_PONG_TIMEOUT) {
+        if (LOGS_ENABLED) DEBUG_D("account%u dc%u resume probe: push ping unanswered for %" PRId64 " ms, reconnecting push", instanceNum, datacenter->getDatacenterId(), now - lastPushPingTime);
+        Connection *push = datacenter->getPushConnection(false);
+        if (push != nullptr) {
+            push->suspendConnection();
+        }
+        // after suspendConnection() so the "+4 s" schedule from onConnectionClosed is overridden: re-ping now
+        sendingPushPing = false;
+        lastPushPingTime = 0;
+    }
 }
 
 void ConnectionsManager::pauseNetwork() {
