@@ -27,6 +27,17 @@ public class EditTextSuggestionsFix implements TextWatcher {
     @Override
     public void beforeTextChanged(CharSequence charSequence, int start, int count, int after) {
         if (ignore) return;
+        // ZG perf: onTextChanged below only ever uses what we save here when
+        // `startIndex == 0 && beforeCount == afterCount` - the IME replacing the whole field
+        // with an equal-length string. TextWatcher's contract gives us exactly those two values
+        // up front (start == startIndex, count == beforeCount, after == afterCount), so apply the
+        // same test here instead of doing three full getSpans() scans, a HashMap and one Pair per
+        // span on every keystroke and then throwing the result away.
+        if (start != 0 || count != after) {
+            beforeSpans = null;
+            beforeSuggestionsCount = 0;
+            return;
+        }
         beforeSpans = saveSpans(charSequence);
         beforeSuggestionsCount = charSequence instanceof Spannable ? ((Spannable) charSequence).getSpans(0, charSequence.length(), SuggestionSpan.class).length : 0;
     }
@@ -34,8 +45,14 @@ public class EditTextSuggestionsFix implements TextWatcher {
     @Override
     public void onTextChanged(CharSequence charSequence, int startIndex, int beforeCount, int afterCount) {
         if (ignore) return;
+        // ZG perf: the cheap, allocation-free half of the condition is tested first so the
+        // getSpans() scan below is skipped on an ordinary keystroke. getSpans() has no side
+        // effects, so reordering the && chain cannot change which edits take the fix-up branch.
+        if (beforeSpans == null || startIndex != 0 || beforeCount != afterCount) {
+            return;
+        }
         final int suggestionsCount = charSequence instanceof Spannable ? ((Spannable) charSequence).getSpans(0, charSequence.length(), SuggestionSpan.class).length : 0;
-        if (beforeSpans != null && (suggestionsCount > 0 || beforeSuggestionsCount > 0) && startIndex == 0 && beforeCount == afterCount) {
+        if (suggestionsCount > 0 || beforeSuggestionsCount > 0) {
             ignore = true;
             applySpans(charSequence, beforeSpans);
             ignore = false;
