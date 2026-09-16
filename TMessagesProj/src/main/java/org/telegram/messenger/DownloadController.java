@@ -261,15 +261,22 @@ public class DownloadController extends BaseController implements NotificationCe
         String defaultLow = "1_1_1_1_1048576_512000_512000_524288_0_0_1_1_50_0";
         String defaultMedium = "13_13_13_13_1048576_10485760_1048576_524288_1_1_1_0_100_1";
         String defaultHigh = "13_13_13_13_1048576_15728640_3145728_524288_1_1_1_0_100_1";
+        // ZG battery (F-11): fork defaults for the mobile / roaming presets. Mobile: photos only
+        // (mask 1 for all four peer types), no video / document auto-download, no video / music /
+        // story preloading, calls unchanged. Roaming: auto-download disabled entirely. Wi-Fi keeps
+        // the stock high preset. These custom strings never equal low/medium/high, so the server
+        // preset refresh in loadAutoDownloadConfig() leaves them alone; a saved user preset wins.
+        String zgDefaultMobile = "1_1_1_1_1048576_0_0_524288_0_0_1_0_100_0";
+        String zgDefaultRoaming = "0_0_0_0_0_0_0_0_0_0_0_1_50_0";
         lowPreset = new Preset(preferences.getString("preset0", defaultLow), defaultLow);
         lowPreset.preloadStories = false;
         mediumPreset = new Preset(preferences.getString("preset1", defaultMedium), defaultMedium);
         highPreset = new Preset(preferences.getString("preset2", defaultHigh), defaultHigh);
         boolean newConfig;
         if ((newConfig = preferences.contains("newConfig")) || !getUserConfig().isClientActivated()) {
-            mobilePreset = new Preset(preferences.getString("mobilePreset", defaultMedium), defaultMedium);
+            mobilePreset = new Preset(preferences.getString("mobilePreset", zgDefaultMobile), zgDefaultMobile);
             wifiPreset = new Preset(preferences.getString("wifiPreset", defaultHigh), defaultHigh);
-            roamingPreset = new Preset(preferences.getString("roamingPreset", defaultLow), defaultLow);
+            roamingPreset = new Preset(preferences.getString("roamingPreset", zgDefaultRoaming), zgDefaultRoaming);
             currentMobilePreset = preferences.getInt("currentMobilePreset", 3);
             currentWifiPreset = preferences.getInt("currentWifiPreset", 3);
             currentRoamingPreset = preferences.getInt("currentRoamingPreset", 3);
