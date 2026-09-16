@@ -26,6 +26,7 @@ public class FilePathDatabase {
     private SQLiteDatabase database;
     private File cacheFile;
     private File shmCacheFile;
+    private File walCacheFile; // ZG (G-04): the database runs in WAL mode now
 
     private final String NULL_PATH = "~null~";
     private final ConcurrentHashMap<String, String> cache = new ConcurrentHashMap<>();
@@ -52,6 +53,7 @@ public class FilePathDatabase {
         }
         cacheFile = new File(filesDir, DATABASE_NAME + ".db");
         shmCacheFile = new File(filesDir, DATABASE_NAME + ".db-shm");
+        walCacheFile = new File(filesDir, DATABASE_NAME + ".db-wal");
 
         boolean createTable = false;
 
@@ -62,6 +64,16 @@ public class FilePathDatabase {
             database = new SQLiteDatabase(cacheFile.getPath());
             database.executeFast("PRAGMA secure_delete = ON").stepThis().dispose();
             database.executeFast("PRAGMA temp_store = MEMORY").stepThis().dispose();
+            // ZG (G-04): this database never set a journal mode, so it ran in the default rollback
+            // journal: create the journal and fsync, write and fsync, delete the journal and fsync
+            // the directory - three or four fsyncs per statement. putPath() runs a REPLACE INTO
+            // paths on every completed file download, on a MAX_PRIORITY thread. WAL plus
+            // synchronous = NORMAL turns that into an appended page with no fsync until a
+            // checkpoint, and unlike NORMAL in rollback mode it carries no corruption risk on
+            // power loss. The size limit keeps the -wal file bounded for a table this small.
+            database.executeFast("PRAGMA journal_mode = WAL").stepThis().dispose();
+            database.executeFast("PRAGMA synchronous = NORMAL").stepThis().dispose();
+            database.executeFast("PRAGMA journal_size_limit = 1048576").stepThis().dispose();
 
             if (createTable) {
                 database.executeFast("CREATE TABLE paths(document_id INTEGER, dc_id INTEGER, type INTEGER, path TEXT, flags INTEGER, PRIMARY KEY(document_id, dc_id, type));").stepThis().dispose();
@@ -82,6 +94,9 @@ public class FilePathDatabase {
                 //migration
             }
             if (!fromBackup) {
+                // ZG (G-04): the backup copies the .db alone, so flush the write-ahead log into it
+                // first - otherwise the copy would be missing everything still sitting in the -wal.
+                database.executeFast("PRAGMA wal_checkpoint(FULL)").stepThis().dispose();
                 createBackup();
             }
             FileLog.d("files db created from_backup= " + fromBackup);
@@ -93,6 +108,7 @@ public class FilePathDatabase {
                 } else {
                     cacheFile.delete();
                     shmCacheFile.delete();
+                    walCacheFile.delete(); // ZG (G-04)
                     createDatabase(tryCount + 1, false);
                 }
             }
@@ -155,6 +171,10 @@ public class FilePathDatabase {
             return false;
         }
         try {
+            // ZG (G-04): drop the sidecar files of the database being replaced, or SQLite would
+            // try to recover a write-ahead log belonging to the old file on top of the restored one.
+            shmCacheFile.delete();
+            walCacheFile.delete();
             return AndroidUtilities.copyFile(backupCacheFile, cacheFile);
         } catch (IOException e) {
             FileLog.e(e);

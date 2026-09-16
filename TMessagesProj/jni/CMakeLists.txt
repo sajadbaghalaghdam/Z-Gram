@@ -95,8 +95,10 @@ set_target_properties(tlottie PROPERTIES
 #sqlite
 add_library(sqlite STATIC
         sqlite/sqlite3.c)
+# ZG (G-04): SQLite was built size-optimised in every build type, release included. -O2 costs
+# about 100 KB of APK and gives back CPU on every query the app runs.
 target_compile_options(sqlite PUBLIC
-        -fno-strict-aliasing -Oz)
+        -fno-strict-aliasing -O2)
 set_target_properties(sqlite PROPERTIES
         ANDROID_ARM_MODE arm)
 target_compile_definitions(sqlite PUBLIC
