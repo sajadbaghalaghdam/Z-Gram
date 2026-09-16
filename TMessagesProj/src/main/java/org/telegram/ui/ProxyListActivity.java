@@ -555,6 +555,20 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                             editor.putString("proxy_secret", SharedConfig.currentProxy.secret);
                             editor.commit();
                         }
+                    } else if (!zgConfigs.isEmpty()) {
+                        // ZG: an Xray server never appears in this list. The entry the core
+                        // registers is the local 127.0.0.1 one, and it is filtered out of the
+                        // visible list in updateRows, so with only Xray servers saved this
+                        // branch used to send the user off to "add a proxy" instead of turning
+                        // on the server they had already selected. Activate it instead; the
+                        // controller registers the local entry, points tgnet at it and posts
+                        // proxySettingsChanged, which flips this switch on.
+                        ZgConfig target = zgController.getActiveConfig();
+                        if (target == null) {
+                            target = zgConfigs.get(0);
+                        }
+                        selectZgConfig(target);
+                        return;
                     } else {
                         presentFragment(new ProxySettingsActivity());
                         return;
