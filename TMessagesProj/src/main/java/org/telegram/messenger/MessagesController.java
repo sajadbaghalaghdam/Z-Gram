@@ -12547,9 +12547,20 @@ public class MessagesController extends BaseController implements NotificationCe
             long[] dialogsLoadOffset = getUserConfig().getDialogLoadOffsets(folderId);
             if (dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetId] != -1) {
                 if (dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetId] == Integer.MAX_VALUE) {
+                    // ZG: this is where an account that finished paging says "there is nothing
+                    // more" - and where an account that finished paging BEFORE the paging fixes
+                    // landed stays stuck forever. Its offsets were written by the old, broken
+                    // paging, so whole pages of dialogs were skipped and never asked for again;
+                    // because we return here without ever calling the server, the shortfall check
+                    // at the end of processLoadedDialogs can never run either. Clear the flag
+                    // first so the resync's own loadDialogs is not swallowed by the re-entrancy
+                    // guard at the top of this method.
+                    loadingDialogs.put(folderId, false);
+                    if (checkDialogsResync(folderId, getUserConfig().getTotalDialogsCount(folderId))) {
+                        return;
+                    }
                     dialogsEndReached.put(folderId, true);
                     serverDialogsEndReached.put(folderId, true);
-                    loadingDialogs.put(folderId, false);
                     getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
                     return;
                 }
@@ -13407,16 +13418,16 @@ public class MessagesController extends BaseController implements NotificationCe
      * is cleared together with the other dialog offsets when the cache is cleared or the account is
      * reset (MessagesStorage.clearLoadingDialogsOffsets/reset).
      */
-    private void checkDialogsResync(int folderId, int loadedDialogsCount) {
+    private boolean checkDialogsResync(int folderId, int loadedDialogsCount) {
         int serverDialogsCount = getUserConfig().getServerDialogsCount(folderId);
         if (serverDialogsCount <= 0 || loadedDialogsCount <= 0) {
-            return;
+            return false;
         }
         if (serverDialogsCount - loadedDialogsCount <= DIALOGS_RESYNC_SLACK) {
-            return;
+            return false;
         }
         if (getUserConfig().isDialogsResyncDone(folderId)) {
-            return;
+            return false;
         }
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("dialogs folderId " + folderId + " finished with " + loadedDialogsCount + " of " + serverDialogsCount + " dialogs reported by the server, re-paging once");
@@ -13428,6 +13439,7 @@ public class MessagesController extends BaseController implements NotificationCe
         dialogsEndReached.put(folderId, false);
         serverDialogsEndReached.put(folderId, false);
         loadDialogs(folderId, 0, 100, false);
+        return true;
     }
 
     public void processLoadedDialogs(final TLRPC.messages_Dialogs dialogsRes, ArrayList<TLRPC.EncryptedChat> encChats, ArrayList<TLRPC.UserFull> fullUsers, int folderId, int offset, int count, int loadType, boolean resetEnd, boolean migrate, boolean fromCache) {
