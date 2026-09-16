@@ -96,6 +96,7 @@ public class ProxySettingsActivity extends BaseFragment {
     private ActionBarMenuItem doneItem;
     private RadioCell[] typeCell = new RadioCell[2];
     private int currentType = -1;
+    private int initialType = -1;
 
     private int pasteType = -1;
     private String pasteString;
@@ -170,6 +171,12 @@ public class ProxySettingsActivity extends BaseFragment {
         super();
         currentProxyInfo = new SharedConfig.ProxyInfo("", 1080, "", "", "");
         addingNewProxy = true;
+    }
+
+    /** Adds a new proxy of the type already picked in the proxy list: TYPE_SOCKS5 or TYPE_MTPROTO. */
+    public ProxySettingsActivity(int type) {
+        this();
+        initialType = type == TYPE_MTPROTO ? TYPE_MTPROTO : TYPE_SOCKS5;
     }
 
     public ProxySettingsActivity(SharedConfig.ProxyInfo proxyInfo) {
@@ -561,7 +568,7 @@ public class ProxySettingsActivity extends BaseFragment {
         checkShareDone(false);
 
         currentType = -1;
-        setProxyType(TextUtils.isEmpty(currentProxyInfo.secret) ? 0 : 1, false);
+        setProxyType(initialType != -1 ? initialType : (TextUtils.isEmpty(currentProxyInfo.secret) ? TYPE_SOCKS5 : TYPE_MTPROTO), false);
 
         pasteType = -1;
         pasteString = null;

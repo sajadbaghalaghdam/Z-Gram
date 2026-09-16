@@ -67,6 +67,8 @@ import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.NumberTextView;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.SlideChooseView;
+import org.zsudo.zg.ZgConfig;
+import org.zsudo.zg.ZgConfigActivity;
 import org.zsudo.zg.ZgProxyController;
 import org.zsudo.zg.ZgSettingsActivity;
 
@@ -90,16 +92,17 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
     private boolean useProxyForCalls;
 
     private int rowCount;
-    private int zgRow;
-    private int zgShadowRow;
     @Keep
     private int useProxyRow;
     private int useProxyShadowRow;
     private int connectionsHeaderRow;
     private int proxyStartRow;
     private int proxyEndRow;
+    private int zgStartRow;
+    private int zgEndRow;
     @Keep
     private int proxyAddRow;
+    private int zgStatusRow;
     private int proxyShadowRow;
     @Keep
     private int callsRow;
@@ -117,6 +120,13 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
     private List<SharedConfig.ProxyInfo> selectedItems = new ArrayList<>();
     private List<SharedConfig.ProxyInfo> proxyList = new ArrayList<>();
     private boolean wasCheckedAllList;
+
+    private final ZgProxyController zgController = ZgProxyController.getInstance();
+    // Saved VLESS/REALITY servers. The running one is a normal SOCKS5 entry on 127.0.0.1 that ZG
+    // keeps in SharedConfig.proxyList (so ping, rotation and tgnet work as usual); it is kept out
+    // of proxyList here and shown as the checked Xray row instead of a bare "127.0.0.1:port".
+    private List<ZgConfig> zgConfigs = new ArrayList<>();
+    private SharedConfig.ProxyInfo zgProxyInfo;
 
     public class TextDetailProxyCell extends FrameLayout {
 
@@ -333,6 +343,137 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         }
     }
 
+    /**
+     * Row of one saved VLESS/REALITY server: the same shape as TextDetailProxyCell, without the
+     * multi-select checkbox (Xray servers are edited and deleted from ZgConfigActivity).
+     */
+    public class ZgProxyCell extends FrameLayout {
+
+        private final TextView textView;
+        private final TextView valueTextView;
+        private final ImageView checkImageView;
+        private ZgConfig currentConfig;
+        private Drawable checkDrawable;
+
+        private int color;
+
+        public ZgProxyCell(Context context) {
+            super(context);
+
+            textView = new TextView(context);
+            textView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+            textView.setLines(1);
+            textView.setMaxLines(1);
+            textView.setSingleLine(true);
+            textView.setEllipsize(TextUtils.TruncateAt.END);
+            textView.setGravity((LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.CENTER_VERTICAL);
+            addView(textView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.TOP, (LocaleController.isRTL ? 56 : 21), 10, (LocaleController.isRTL ? 21 : 56), 0));
+
+            valueTextView = new TextView(context);
+            valueTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
+            valueTextView.setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
+            valueTextView.setLines(1);
+            valueTextView.setMaxLines(1);
+            valueTextView.setSingleLine(true);
+            valueTextView.setCompoundDrawablePadding(AndroidUtilities.dp(6));
+            valueTextView.setEllipsize(TextUtils.TruncateAt.END);
+            valueTextView.setPadding(0, 0, 0, 0);
+            addView(valueTextView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.TOP, (LocaleController.isRTL ? 56 : 21), 35, (LocaleController.isRTL ? 21 : 56), 0));
+
+            checkImageView = new ImageView(context);
+            checkImageView.setImageResource(R.drawable.msg_info);
+            checkImageView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText3), PorterDuff.Mode.MULTIPLY));
+            checkImageView.setScaleType(ImageView.ScaleType.CENTER);
+            checkImageView.setContentDescription(getString(R.string.Edit));
+            addView(checkImageView, LayoutHelper.createFrame(48, 48, (LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT) | Gravity.TOP, 8, 8, 8, 0));
+            checkImageView.setOnClickListener(v -> {
+                if (currentConfig != null) {
+                    presentFragment(new ZgConfigActivity(currentConfig));
+                }
+            });
+
+            setWillNotDraw(false);
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            super.onMeasure(MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(64) + 1, MeasureSpec.EXACTLY));
+        }
+
+        public void setConfig(ZgConfig config) {
+            currentConfig = config;
+            textView.setText(config.getTitle());
+        }
+
+        public void updateStatus() {
+            if (currentConfig == null) {
+                return;
+            }
+            int colorKey;
+            boolean active = zgController.getActiveConfigId() == currentConfig.id;
+            if (active && zgController.isBusy()) {
+                valueTextView.setText(getString(R.string.ZgStatusStarting));
+                colorKey = Theme.key_windowBackgroundWhiteGrayText2;
+            } else if (active && zgProxyInfo != null && useProxySettings && SharedConfig.currentProxy == zgProxyInfo) {
+                if (currentConnectionState == ConnectionsManager.ConnectionStateConnected || currentConnectionState == ConnectionsManager.ConnectionStateUpdating) {
+                    colorKey = Theme.key_windowBackgroundWhiteBlueText6;
+                    if (zgProxyInfo.ping != 0) {
+                        valueTextView.setText(getString(R.string.Connected) + ", " + LocaleController.formatString("Ping", R.string.Ping, zgProxyInfo.ping));
+                    } else {
+                        valueTextView.setText(getString(R.string.Connected));
+                    }
+                    if (!zgProxyInfo.checking && !zgProxyInfo.available) {
+                        zgProxyInfo.availableCheckTime = 0;
+                    }
+                } else {
+                    colorKey = Theme.key_windowBackgroundWhiteGrayText2;
+                    valueTextView.setText(getString(R.string.Connecting));
+                }
+            } else if (active || !currentConfig.isValid()) {
+                // selected but not connected, or a link the core cannot use
+                valueTextView.setText(getString(R.string.Unavailable));
+                colorKey = Theme.key_text_RedRegular;
+            } else {
+                valueTextView.setText(currentConfig.hostPort());
+                colorKey = Theme.key_windowBackgroundWhiteGrayText2;
+            }
+            color = Theme.getColor(colorKey);
+            valueTextView.setTag(colorKey);
+            valueTextView.setTextColor(color);
+            if (checkDrawable != null) {
+                checkDrawable.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.MULTIPLY));
+            }
+        }
+
+        public void setChecked(boolean checked) {
+            if (checked) {
+                if (checkDrawable == null) {
+                    checkDrawable = getResources().getDrawable(R.drawable.proxy_check).mutate();
+                }
+                checkDrawable.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.MULTIPLY));
+                if (LocaleController.isRTL) {
+                    valueTextView.setCompoundDrawablesWithIntrinsicBounds(null, null, checkDrawable, null);
+                } else {
+                    valueTextView.setCompoundDrawablesWithIntrinsicBounds(checkDrawable, null, null, null);
+                }
+            } else {
+                valueTextView.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
+            }
+        }
+
+        @Override
+        protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            updateStatus();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            canvas.drawLine(LocaleController.isRTL ? 0 : AndroidUtilities.dp(20), getMeasuredHeight() - 1, getMeasuredWidth() - (LocaleController.isRTL ? AndroidUtilities.dp(20) : 0), getMeasuredHeight() - 1, Theme.dividerPaint);
+        }
+    }
+
     @Override
     public boolean onFragmentCreate() {
         super.onFragmentCreate();
@@ -399,9 +540,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT));
         listView.setAdapter(listAdapter);
         listView.setOnItemClickListener((view, position) -> {
-            if (position == zgRow) {
-                presentFragment(new ZgSettingsActivity());
-            } else if (position == useProxyRow) {
+            if (position == useProxyRow) {
                 if (SharedConfig.currentProxy == null) {
                     if (!proxyList.isEmpty()) {
                         SharedConfig.currentProxy = proxyList.get(0);
@@ -446,6 +585,11 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged);
                 NotificationCenter.getGlobalInstance().addObserver(ProxyListActivity.this, NotificationCenter.proxySettingsChanged);
 
+                if (!useProxySettings) {
+                    // no proxy at all: the tunnel must not stay up behind it
+                    zgController.deactivate(null);
+                }
+
                 for (int a = proxyStartRow; a < proxyEndRow; a++) {
                     RecyclerListView.Holder holder = (RecyclerListView.Holder) listView.findViewHolderForAdapterPosition(a);
                     if (holder != null) {
@@ -473,6 +617,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     return;
                 }
                 SharedConfig.ProxyInfo info = proxyList.get(position - proxyStartRow);
+                // a SOCKS5/MTProto proxy takes over: the tunnel behind it is not needed any more
+                zgController.deactivate(null);
                 useProxySettings = true;
                 SharedPreferences.Editor editor = MessagesController.getGlobalMainSettings().edit();
                 editor.putString("proxy_ip", info.address);
@@ -502,8 +648,28 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     textCheckCell.setChecked(true);
                 }
                 ConnectionsManager.setProxySettings(useProxySettings, SharedConfig.currentProxy.address, SharedConfig.currentProxy.port, SharedConfig.currentProxy.username, SharedConfig.currentProxy.password, SharedConfig.currentProxy.secret);
+            } else if (position >= zgStartRow && position < zgEndRow) {
+                if (!selectedItems.isEmpty()) {
+                    return;
+                }
+                selectZgConfig(zgConfigs.get(position - zgStartRow));
             } else if (position == proxyAddRow) {
-                presentFragment(new ProxySettingsActivity());
+                if (getParentActivity() == null) {
+                    return;
+                }
+                AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+                builder.setTitle(getString(R.string.AddProxy));
+                builder.setItems(new CharSequence[]{getString(R.string.UseProxySocks5), getString(R.string.UseProxyTelegram), getString(R.string.ZgXray)}, (dialog, which) -> {
+                    if (which == 2) {
+                        presentFragment(new ZgConfigActivity());
+                    } else {
+                        presentFragment(new ProxySettingsActivity(which));
+                    }
+                });
+                builder.setNegativeButton(getString(R.string.Cancel), null);
+                showDialog(builder.create());
+            } else if (position == zgStatusRow) {
+                presentFragment(new ZgSettingsActivity());
             } else if (position == deleteAllRow) {
                 AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
                 builder.setMessage(getString(R.string.DeleteAllProxiesConfirm));
@@ -514,7 +680,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                         SharedConfig.deleteProxy(info);
                     }
                     useProxyForCalls = false;
-                    useProxySettings = false;
+                    // an active ZG tunnel is not part of this list and stays the current proxy
+                    useProxySettings = SharedConfig.currentProxy != null && MessagesController.getGlobalMainSettings().getBoolean("proxy_enabled", false);
                     NotificationCenter.getGlobalInstance().removeObserver(ProxyListActivity.this, NotificationCenter.proxySettingsChanged);
                     NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged);
                     NotificationCenter.getGlobalInstance().addObserver(ProxyListActivity.this, NotificationCenter.proxySettingsChanged);
@@ -635,8 +802,6 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
 
     private void updateRows(boolean notify) {
         rowCount = 0;
-        zgRow = rowCount++;
-        zgShadowRow = rowCount++;
         useProxyRow = rowCount++;
         if (useProxySettings && SharedConfig.currentProxy != null && SharedConfig.proxyList.size() > 1 && IS_PROXY_ROTATION_AVAILABLE) {
             rotationRow = rowCount++;
@@ -660,8 +825,19 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         connectionsHeaderRow = rowCount++;
 
         if (notify) {
+            zgConfigs.clear();
+            zgConfigs.addAll(zgController.getConfigs());
+
+            zgProxyInfo = null;
             proxyList.clear();
-            proxyList.addAll(SharedConfig.proxyList);
+            for (int a = 0, count = SharedConfig.proxyList.size(); a < count; a++) {
+                SharedConfig.ProxyInfo info = SharedConfig.proxyList.get(a);
+                if (!zgConfigs.isEmpty() && zgController.isZgProxy(info)) {
+                    zgProxyInfo = info;
+                    continue;
+                }
+                proxyList.add(info);
+            }
 
             boolean checking = false;
             if (!wasCheckedAllList) {
@@ -699,7 +875,16 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
             proxyStartRow = -1;
             proxyEndRow = -1;
         }
+        if (!zgConfigs.isEmpty()) {
+            zgStartRow = rowCount;
+            rowCount += zgConfigs.size();
+            zgEndRow = rowCount;
+        } else {
+            zgStartRow = -1;
+            zgEndRow = -1;
+        }
         proxyAddRow = rowCount++;
+        zgStatusRow = zgConfigs.isEmpty() ? -1 : rowCount++;
         proxyShadowRow = rowCount++;
         if (SharedConfig.currentProxy == null || SharedConfig.currentProxy.secret.isEmpty()) {
             boolean change = callsRow == -1;
@@ -729,26 +914,66 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         }
     }
 
+    private void updateZgRows() {
+        if (listView == null || zgStartRow < 0) {
+            return;
+        }
+        for (int a = zgStartRow; a < zgEndRow; a++) {
+            RecyclerListView.Holder holder = (RecyclerListView.Holder) listView.findViewHolderForAdapterPosition(a);
+            if (holder != null && holder.itemView instanceof ZgProxyCell) {
+                ZgProxyCell cell = (ZgProxyCell) holder.itemView;
+                cell.updateStatus();
+                cell.setChecked(cell.currentConfig != null && zgController.getActiveConfigId() == cell.currentConfig.id);
+            }
+        }
+    }
+
+    /** Starts the ZG core with this server and points tgnet at its local listener. */
+    private void selectZgConfig(ZgConfig config) {
+        if (zgController.isBusy()) {
+            return;
+        }
+        zgController.activate(config, (running, error) -> {
+            if (listAdapter == null) {
+                return;
+            }
+            updateRows(true);
+            if (!running && getParentActivity() != null) {
+                AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
+                builder.setTitle(getString(R.string.ZgStartFailed));
+                builder.setMessage(TextUtils.isEmpty(error) ? getString(R.string.ZgStatusError) : error);
+                builder.setPositiveButton(getString(R.string.OK), null);
+                showDialog(builder.create());
+            }
+        });
+        updateRows(true);
+    }
+
     private void checkProxyList() {
         for (int a = 0, count = proxyList.size(); a < count; a++) {
-            final SharedConfig.ProxyInfo proxyInfo = proxyList.get(a);
-            if (proxyInfo.checking || SystemClock.elapsedRealtime() - proxyInfo.availableCheckTime < 2 * 60 * 1000) {
-                continue;
-            }
-            proxyInfo.checking = true;
-            proxyInfo.proxyCheckPingId = ConnectionsManager.getInstance(currentAccount).checkProxy(proxyInfo.address, proxyInfo.port, proxyInfo.username, proxyInfo.password, proxyInfo.secret, time -> AndroidUtilities.runOnUIThread(() -> {
-                proxyInfo.availableCheckTime = SystemClock.elapsedRealtime();
-                proxyInfo.checking = false;
-                if (time == -1) {
-                    proxyInfo.available = false;
-                    proxyInfo.ping = 0;
-                } else {
-                    proxyInfo.ping = time;
-                    proxyInfo.available = true;
-                }
-                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxyCheckDone, proxyInfo);
-            }));
+            checkProxy(proxyList.get(a));
         }
+        // ZG's listener is kept out of proxyList but still gets the regular ping check
+        checkProxy(zgProxyInfo);
+    }
+
+    private void checkProxy(final SharedConfig.ProxyInfo proxyInfo) {
+        if (proxyInfo == null || proxyInfo.checking || SystemClock.elapsedRealtime() - proxyInfo.availableCheckTime < 2 * 60 * 1000) {
+            return;
+        }
+        proxyInfo.checking = true;
+        proxyInfo.proxyCheckPingId = ConnectionsManager.getInstance(currentAccount).checkProxy(proxyInfo.address, proxyInfo.port, proxyInfo.username, proxyInfo.password, proxyInfo.secret, time -> AndroidUtilities.runOnUIThread(() -> {
+            proxyInfo.availableCheckTime = SystemClock.elapsedRealtime();
+            proxyInfo.checking = false;
+            if (time == -1) {
+                proxyInfo.available = false;
+                proxyInfo.ping = 0;
+            } else {
+                proxyInfo.ping = time;
+                proxyInfo.available = true;
+            }
+            NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxyCheckDone, proxyInfo);
+        }));
     }
 
     @Override
@@ -775,18 +1000,20 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     cell.updateStatus();
                 }
             });
+            updateZgRows();
 
             updateRows(false);
         } else if (id == NotificationCenter.zgProxyStateChanged) {
-            if (listAdapter != null) {
-                listAdapter.notifyItemChanged(zgRow);
-            }
+            updateRows(true);
         } else if (id == NotificationCenter.proxySettingsChanged) {
+            // ZG turns the proxy on and off by itself, so the switch is read back from the prefs
+            useProxySettings = MessagesController.getGlobalMainSettings().getBoolean("proxy_enabled", false) && !SharedConfig.proxyList.isEmpty();
             updateRows(true);
         } else if (id == NotificationCenter.didUpdateConnectionState) {
             int state = ConnectionsManager.getInstance(account).getConnectionState();
             if (currentConnectionState != state) {
                 currentConnectionState = state;
+                updateZgRows();
                 if (listView != null && SharedConfig.currentProxy != null) {
                     int idx = proxyList.indexOf(SharedConfig.currentProxy);
                     if (idx >= 0) {
@@ -812,6 +1039,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                         TextDetailProxyCell cell = (TextDetailProxyCell) holder.itemView;
                         cell.updateStatus();
                     }
+                } else if (proxyInfo == zgProxyInfo) {
+                    updateZgRows();
                 }
 
                 boolean checking = false;
@@ -840,7 +1069,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
             VIEW_TYPE_TEXT_CHECK = 3,
             VIEW_TYPE_INFO = 4,
             VIEW_TYPE_PROXY_DETAIL = 5,
-            VIEW_TYPE_SLIDE_CHOOSER = 6;
+            VIEW_TYPE_SLIDE_CHOOSER = 6,
+            VIEW_TYPE_ZG_PROXY_DETAIL = 7;
 
         public static final int PAYLOAD_CHECKED_CHANGED = 0;
         public static final int PAYLOAD_SELECTION_CHANGED = 1;
@@ -903,10 +1133,10 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 case VIEW_TYPE_TEXT_SETTING: {
                     TextSettingsCell textCell = (TextSettingsCell) holder.itemView;
                     textCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-                    if (position == zgRow) {
-                        textCell.setTextAndValue(getString(R.string.ZgProxy), getString(ZgProxyController.getInstance().isEnabled() ? R.string.ZgOn : R.string.ZgOff), false);
-                    } else if (position == proxyAddRow) {
-                        textCell.setText(getString(R.string.AddProxy), deleteAllRow != -1);
+                    if (position == proxyAddRow) {
+                        textCell.setText(getString(R.string.AddProxy), zgStatusRow != -1 || deleteAllRow != -1);
+                    } else if (position == zgStatusRow) {
+                        textCell.setTextAndValue(getString(R.string.ZgProxy), getString(zgController.isEnabled() ? R.string.ZgOn : R.string.ZgOff), deleteAllRow != -1);
                     } else if (position == deleteAllRow) {
                         textCell.setTextColor(Theme.getColor(Theme.key_text_RedRegular));
                         textCell.setText(getString(R.string.DeleteAllProxies), false);
@@ -947,6 +1177,14 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     cell.setChecked(SharedConfig.currentProxy == info);
                     cell.setItemSelected(selectedItems.contains(proxyList.get(position - proxyStartRow)), false);
                     cell.setSelectionEnabled(!selectedItems.isEmpty(), false);
+                    break;
+                }
+                case VIEW_TYPE_ZG_PROXY_DETAIL: {
+                    ZgProxyCell cell = (ZgProxyCell) holder.itemView;
+                    ZgConfig config = zgConfigs.get(position - zgStartRow);
+                    cell.setConfig(config);
+                    cell.updateStatus();
+                    cell.setChecked(zgController.getActiveConfigId() == config.id);
                     break;
                 }
                 case VIEW_TYPE_SLIDE_CHOOSER: {
@@ -1012,7 +1250,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == zgRow || position == useProxyRow || position == rotationRow || position == callsRow || position == proxyAddRow || position == deleteAllRow || position >= proxyStartRow && position < proxyEndRow;
+            return position == useProxyRow || position == rotationRow || position == callsRow || position == proxyAddRow || position == zgStatusRow || position == deleteAllRow || position >= proxyStartRow && position < proxyEndRow || position >= zgStartRow && position < zgEndRow;
         }
 
         @Override
@@ -1041,6 +1279,10 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     view = new SlideChooseView(mContext);
                     view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     break;
+                case VIEW_TYPE_ZG_PROXY_DETAIL:
+                    view = new ZgProxyCell(mContext);
+                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                    break;
                 case VIEW_TYPE_PROXY_DETAIL:
                 default:
                     view = new TextDetailProxyCell(mContext);
@@ -1054,10 +1296,11 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         @Override
         public long getItemId(int position) {
             // Random stable ids, could be anything non-repeating
-            if (position == zgRow) {
+            if (position == zgStatusRow) {
                 return -12;
-            } else if (position == zgShadowRow) {
-                return -13;
+            } else if (position >= zgStartRow && position < zgEndRow) {
+                // config ids are millisecond timestamps, far away from the constants above
+                return zgConfigs.get(position - zgStartRow).id;
             } else if (position == useProxyShadowRow) {
                 return -1;
             } else if (position == proxyShadowRow) {
@@ -1087,9 +1330,9 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
 
         @Override
         public int getItemViewType(int position) {
-            if (position == useProxyShadowRow || position == proxyShadowRow || position == zgShadowRow) {
+            if (position == useProxyShadowRow || position == proxyShadowRow) {
                 return VIEW_TYPE_SHADOW;
-            } else if (position == proxyAddRow || position == deleteAllRow || position == zgRow) {
+            } else if (position == proxyAddRow || position == deleteAllRow || position == zgStatusRow) {
                 return VIEW_TYPE_TEXT_SETTING;
             } else if (position == useProxyRow || position == rotationRow || position == callsRow) {
                 return VIEW_TYPE_TEXT_CHECK;
@@ -1099,6 +1342,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 return VIEW_TYPE_SLIDE_CHOOSER;
             } else if (position >= proxyStartRow && position < proxyEndRow) {
                 return VIEW_TYPE_PROXY_DETAIL;
+            } else if (position >= zgStartRow && position < zgEndRow) {
+                return VIEW_TYPE_ZG_PROXY_DETAIL;
             } else {
                 return VIEW_TYPE_INFO;
             }
@@ -1109,7 +1354,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
     public ArrayList<ThemeDescription> getThemeDescriptions() {
         ArrayList<ThemeDescription> themeDescriptions = new ArrayList<>();
 
-        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR, new Class[]{TextSettingsCell.class, TextCheckCell.class, HeaderCell.class, TextDetailProxyCell.class}, null, null, null, Theme.key_windowBackgroundWhite));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR, new Class[]{TextSettingsCell.class, TextCheckCell.class, HeaderCell.class, TextDetailProxyCell.class, ZgProxyCell.class}, null, null, null, Theme.key_windowBackgroundWhite));
         themeDescriptions.add(new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundGray));
 
 //        themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault));
@@ -1131,6 +1376,12 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_TEXTCOLOR | ThemeDescription.FLAG_CHECKTAG | ThemeDescription.FLAG_IMAGECOLOR, new Class[]{TextDetailProxyCell.class}, new String[]{"valueTextView"}, null, null, null, Theme.key_windowBackgroundWhiteGreenText));
         themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_TEXTCOLOR | ThemeDescription.FLAG_CHECKTAG | ThemeDescription.FLAG_IMAGECOLOR, new Class[]{TextDetailProxyCell.class}, new String[]{"valueTextView"}, null, null, null, Theme.key_text_RedRegular));
         themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_IMAGECOLOR, new Class[]{TextDetailProxyCell.class}, new String[]{"checkImageView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText3));
+
+        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{ZgProxyCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlackText));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_TEXTCOLOR | ThemeDescription.FLAG_CHECKTAG | ThemeDescription.FLAG_IMAGECOLOR, new Class[]{ZgProxyCell.class}, new String[]{"valueTextView"}, null, null, null, Theme.key_windowBackgroundWhiteBlueText6));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_TEXTCOLOR | ThemeDescription.FLAG_CHECKTAG | ThemeDescription.FLAG_IMAGECOLOR, new Class[]{ZgProxyCell.class}, new String[]{"valueTextView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText2));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_TEXTCOLOR | ThemeDescription.FLAG_CHECKTAG | ThemeDescription.FLAG_IMAGECOLOR, new Class[]{ZgProxyCell.class}, new String[]{"valueTextView"}, null, null, null, Theme.key_text_RedRegular));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_IMAGECOLOR, new Class[]{ZgProxyCell.class}, new String[]{"checkImageView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText3));
 
         themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{HeaderCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlueHeader));
 
