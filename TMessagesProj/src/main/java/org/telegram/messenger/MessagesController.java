@@ -12529,6 +12529,16 @@ public class MessagesController extends BaseController implements NotificationCe
         if (loadingDialogs.get(folderId) || resetingDialogs) {
             return;
         }
+        // ZG: an account whose paging offsets were written by the old, skipping paging is latched
+        // at "finished" with chats missing, and nothing ever asks the server again - not even the
+        // shortfall check at the end of processLoadedDialogs, because no page is ever requested.
+        // Re-examine that verdict here, before the re-entrancy guard below is armed, so the
+        // resync's own loadDialogs is not swallowed by it. Only a list that claims to be finished
+        // is reconsidered, so an account still paging normally is never disturbed.
+        if (getUserConfig().getDialogLoadOffsets(folderId)[UserConfig.i_dialogsLoadOffsetId] == Integer.MAX_VALUE
+                && checkDialogsResync(folderId, getUserConfig().getTotalDialogsCount(folderId))) {
+            return;
+        }
         loadingDialogs.put(folderId, true);
         getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
         if (BuildVars.LOGS_ENABLED) {
@@ -12547,20 +12557,9 @@ public class MessagesController extends BaseController implements NotificationCe
             long[] dialogsLoadOffset = getUserConfig().getDialogLoadOffsets(folderId);
             if (dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetId] != -1) {
                 if (dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetId] == Integer.MAX_VALUE) {
-                    // ZG: this is where an account that finished paging says "there is nothing
-                    // more" - and where an account that finished paging BEFORE the paging fixes
-                    // landed stays stuck forever. Its offsets were written by the old, broken
-                    // paging, so whole pages of dialogs were skipped and never asked for again;
-                    // because we return here without ever calling the server, the shortfall check
-                    // at the end of processLoadedDialogs can never run either. Clear the flag
-                    // first so the resync's own loadDialogs is not swallowed by the re-entrancy
-                    // guard at the top of this method.
-                    loadingDialogs.put(folderId, false);
-                    if (checkDialogsResync(folderId, getUserConfig().getTotalDialogsCount(folderId))) {
-                        return;
-                    }
                     dialogsEndReached.put(folderId, true);
                     serverDialogsEndReached.put(folderId, true);
+                    loadingDialogs.put(folderId, false);
                     getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
                     return;
                 }
