@@ -13485,6 +13485,10 @@ public class MessagesController extends BaseController implements NotificationCe
                     }
                 }
             }
+            // ZG: legacy fallback for accounts that never stored valid dialog load offsets
+            // (UserConfig.hasValidDialogLoadIds == false); everywhere else the end of the list is
+            // decided by the paging offset below, not by the size of the page.
+            boolean serverDialogsEnd = (dialogsRes.dialogs.size() == 0 || dialogsRes.dialogs.size() != count) && loadType == 0;
             if (!fromCache && !migrate && dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetId] != -1 && loadType == 0) {
                 int totalDialogsLoadCount = getUserConfig().getTotalDialogsCount(folderId);
                 int dialogsLoadOffsetId;
@@ -13565,7 +13569,9 @@ public class MessagesController extends BaseController implements NotificationCe
                         dialogsLoadOffsetAccess);
                 getUserConfig().setTotalDialogsCount(folderId, totalDialogsLoadCount);
                 getUserConfig().saveConfig(false);
+                serverDialogsEnd = dialogsLoadOffsetId == Integer.MAX_VALUE;
             }
+            final boolean serverDialogsEndFinal = serverDialogsEnd;
 
             ArrayList<TLRPC.Dialog> dialogsToReload = new ArrayList<>();
             for (int a = 0; a < dialogsRes.dialogs.size(); a++) {
@@ -13854,7 +13860,7 @@ public class MessagesController extends BaseController implements NotificationCe
 
                 if (loadType != DIALOGS_LOAD_TYPE_CHANNEL && loadType != DIALOGS_LOAD_TYPE_UNKNOWN) {
                     if (!migrate) {
-                        dialogsEndReached.put(folderId, (dialogsRes.dialogs.size() == 0 || dialogsRes.dialogs.size() != count) && loadType == 0);
+                        dialogsEndReached.put(folderId, serverDialogsEndFinal);
                         if (archivedDialogsCount > 0 && archivedDialogsCount < 20 && folderId == 0) {
                             dialogsEndReached.put(1, true);
                             long[] dialogsLoadOffsetArchived = getUserConfig().getDialogLoadOffsets(folderId);
@@ -13863,7 +13869,7 @@ public class MessagesController extends BaseController implements NotificationCe
                             }
                         }
                         if (!fromCache) {
-                            serverDialogsEndReached.put(folderId, (dialogsRes.dialogs.size() == 0 || dialogsRes.dialogs.size() != count) && loadType == 0);
+                            serverDialogsEndReached.put(folderId, serverDialogsEndFinal);
                         }
                     }
                 }
