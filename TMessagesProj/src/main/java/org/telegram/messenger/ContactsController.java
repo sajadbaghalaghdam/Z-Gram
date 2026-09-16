@@ -432,6 +432,25 @@ public class ContactsController extends BaseController {
 
                     }
                 }
+                // ZG battery (F-22, round-two re-verdict): ContactsSyncAdapterService.performSync has
+                // an empty body, but res/xml/sync_contacts.xml registers it against
+                // com.android.contacts, so SyncManager schedules it and binds the service on
+                // contacts-provider activity. On this standalone build the process is never frozen,
+                // so each of those bindings is a real process touch for no work at all. Turn
+                // automatic syncing off for our account while keeping the account itself - the
+                // account entry is what makes ZG contacts appear in the system Contacts app and
+                // provides the "message on ZG" row, and contact rows are written directly through
+                // ContentProviderOperations, never by the sync adapter. The manifest entry and
+                // sync_contacts.xml are deliberately left in place.
+                if (systemAccount != null) {
+                    try {
+                        if (ContentResolver.getSyncAutomatically(systemAccount, ContactsContract.AUTHORITY)) {
+                            ContentResolver.setSyncAutomatically(systemAccount, ContactsContract.AUTHORITY, false);
+                        }
+                    } catch (Throwable ignore) {
+
+                    }
+                }
             }
         });
     }
