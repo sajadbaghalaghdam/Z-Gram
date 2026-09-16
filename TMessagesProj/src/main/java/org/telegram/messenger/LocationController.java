@@ -68,7 +68,11 @@ public class LocationController extends BaseController implements NotificationCe
     private boolean wasConnectedToPlayServices;
     private ILocationServiceProvider.IMapApiClient apiClient;
     private final static int PLAY_SERVICES_RESOLUTION_REQUEST = 9000;
-    private final static long UPDATE_INTERVAL = 1000, FASTEST_INTERVAL = 1000;
+    // ZG battery (F-09): positions are only sent every 20-30 s (FOREGROUND/BACKGROUD_UPDATE_TIME),
+    // so asking the GNSS chip for a fix every second just discards 19 of every 20 fixes.
+    private final static long UPDATE_INTERVAL = 15000, FASTEST_INTERVAL = 5000;
+    private final static long GPS_MIN_TIME = 15000, NETWORK_MIN_TIME = 30000;
+    private final static float GPS_MIN_DISTANCE = 10, NETWORK_MIN_DISTANCE = 25;
     private final static int BACKGROUD_UPDATE_TIME = 30 * 1000;
     private final static int LOCATION_ACQUIRE_TIME = 10 * 1000;
     private final static int FOREGROUND_UPDATE_TIME = 20 * 1000;
@@ -305,6 +309,20 @@ public class LocationController extends BaseController implements NotificationCe
         }
     }
 
+    private boolean hasProximityAlert() {
+        for (int a = 0; a < sharingLocations.size(); a++) {
+            if (sharingLocations.get(a).proximityMeters > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void updateLocationRequestPriority() {
+        // keep full accuracy only while a proximity alert depends on it
+        locationRequest.setPriority(hasProximityAlert() ? ILocationServiceProvider.PRIORITY_HIGH_ACCURACY : ILocationServiceProvider.PRIORITY_BALANCED_POWER_ACCURACY);
+    }
+
     public void startFusedLocationRequest(boolean permissionsGranted) {
         Utilities.stageQueue.postRunnable(() -> {
             if (!permissionsGranted) {
@@ -313,6 +331,7 @@ public class LocationController extends BaseController implements NotificationCe
             if (!sharingLocations.isEmpty()) {
                 if (permissionsGranted) {
                     try {
+                        updateLocationRequestPriority();
                         ApplicationLoader.getLocationServiceProvider().getLastLocation(this::setLastKnownLocation);
                         ApplicationLoader.getLocationServiceProvider().requestLocationUpdates(locationRequest, fusedLocationListener);
                     } catch (Throwable e) {
@@ -813,6 +832,7 @@ public class LocationController extends BaseController implements NotificationCe
         lastLocationStartTime = SystemClock.elapsedRealtime();
         started = true;
         boolean ok = false;
+        updateLocationRequestPriority();
         if (checkServices()) {
             try {
                 apiClient.connect();
@@ -822,13 +842,14 @@ public class LocationController extends BaseController implements NotificationCe
             }
         }
         if (!ok) {
+            final boolean proximity = hasProximityAlert();
             try {
-                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1, 0, gpsLocationListener);
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, proximity ? FASTEST_INTERVAL : GPS_MIN_TIME, proximity ? 0 : GPS_MIN_DISTANCE, gpsLocationListener);
             } catch (Exception e) {
                 FileLog.e(e);
             }
             try {
-                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1, 0, networkLocationListener);
+                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, NETWORK_MIN_TIME, NETWORK_MIN_DISTANCE, networkLocationListener);
             } catch (Exception e) {
                 FileLog.e(e);
             }
