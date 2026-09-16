@@ -130,8 +130,11 @@ public class ContactsController extends BaseController {
                     return;
                 }
             }
+            // ZG battery (F-17): any write to the contacts provider by any app lands here and costs a
+            // full phone-book read plus a network wake-up for every account. Coalesce bursts with a
+            // 30 s debounce; checkContacts() also runs on every app resume after a pause > 5 s.
             Utilities.globalQueue.cancelRunnable(checkRunnable);
-            Utilities.globalQueue.postRunnable(checkRunnable, 500);
+            Utilities.globalQueue.postRunnable(checkRunnable, 30000);
         }
 
         @Override
