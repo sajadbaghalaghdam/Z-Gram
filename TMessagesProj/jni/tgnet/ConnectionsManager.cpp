@@ -263,24 +263,50 @@ void ConnectionsManager::select() {
     }
 
     if (lastPauseTime != 0 && llabs(now - lastPauseTime) >= nextSleepTimeout) {
-        bool dontSleep = !requestingSaltsForDc.empty();
-        if (!dontSleep) {
-            for (auto & runningRequest : runningRequests) {
-                Request *request = runningRequest.get();
+        // ZG battery (G-02): stock keeps resetting lastPauseTime below for as long as *any* download
+        // or upload request object exists, with no upper bound. Such a request is never abandoned -
+        // failedButTimeToTryAgain re-issues it every 30 s forever, and FileLoadOperation.pause()
+        // only cancels queued requests, never the ones already handed to a connection - so a single
+        // transfer that the tunnel blackholes keeps the app out of the paused state indefinitely:
+        // 1 Hz select(), 1 Hz updateTimerProc per account, a generic ping every 28 s and a retry on
+        // a fresh socket every 30 s, all night. Stay awake only while a transfer makes progress.
+        // After STALLED_TRANSFER_TIMEOUT with no byte on any download/upload socket the transfer is
+        // dead and sleeping is the correct state; FileLoader re-drives it on the next foreground,
+        // on setNetworkAvailable(true) and after the forced getDifference on resume.
+        bool dontSleep = !requestingSaltsForDc.empty() && llabs(now - saltRequestStartTime) < STALLED_SALT_REQUEST_TIMEOUT;
+        bool hasTransfer = false;
+        for (auto & runningRequest : runningRequests) {
+            Request *request = runningRequest.get();
+            if (request->connectionType & ConnectionTypeDownload || request->connectionType & ConnectionTypeUpload) {
+                hasTransfer = true;
+                break;
+            }
+        }
+        if (!hasTransfer) {
+            for (auto & iter : requestsQueue) {
+                Request *request = iter.get();
                 if (request->connectionType & ConnectionTypeDownload || request->connectionType & ConnectionTypeUpload) {
-                    dontSleep = true;
+                    hasTransfer = true;
                     break;
                 }
             }
         }
-        if (!dontSleep) {
-            for (auto & iter : requestsQueue) {
-                Request *request = iter.get();
-                if (request->connectionType & ConnectionTypeDownload || request->connectionType & ConnectionTypeUpload) {
-                    dontSleep = true;
-                    break;
-                }
+        if (hasTransfer) {
+            // A transfer that has not produced a byte yet still gets the full grace period, counted
+            // from the first tick that saw it. transferPendingSince is cleared when the transfer
+            // list empties, on app pause and on a full (foreground) resume, never on the partial
+            // background wake-up, so an incoming push cannot re-arm the pin for a dead transfer.
+            if (transferPendingSince == 0) {
+                transferPendingSince = now;
             }
+            int64_t lastTransferProgress = lastTransferActivityTime > transferPendingSince ? lastTransferActivityTime : transferPendingSince;
+            if (llabs(now - lastTransferProgress) < STALLED_TRANSFER_TIMEOUT) {
+                dontSleep = true;
+            } else {
+                if (LOGS_ENABLED) DEBUG_D("stalled transfer: no upload or download bytes for %" PRId64 " ms, letting the app sleep", now - lastTransferProgress);
+            }
+        } else {
+            transferPendingSince = 0;
         }
         if (!dontSleep) {
             if (!networkPaused) {
@@ -854,6 +880,12 @@ void ConnectionsManager::onConnectionQuickAckReceived(Connection *connection, in
 }
 
 void ConnectionsManager::onConnectionDataReceived(Connection *connection, NativeByteBuffer *data, uint32_t length) {
+    // ZG battery (G-02): the sleep check in select() needs to know whether a transfer is actually
+    // progressing rather than merely pending. Any MTProto packet on a download/upload socket -
+    // payload, rpc_result or a quick ack - counts as progress; nothing else writes this timestamp.
+    if (connection->getConnectionType() & (ConnectionTypeDownload | ConnectionTypeUpload)) {
+        lastTransferActivityTime = getCurrentTimeMonotonicMillis();
+    }
     bool error = false;
     if (length <= 24 + 32) {
         int32_t code = data->readInt32(&error);
@@ -2399,12 +2431,20 @@ void ConnectionsManager::requestSaltsForDatacenter(Datacenter *datacenter, bool 
         connectionType = ConnectionTypeGeneric;
     }
     requestingSaltsForDc.push_back(id);
+    if (requestingSaltsForDc.size() == 1) {
+        // ZG battery (G-02): timestamp the oldest outstanding salt request so select() stops
+        // treating a get_future_salts that never completes as a reason to stay awake.
+        saltRequestStartTime = getCurrentTimeMonotonicMillis();
+    }
     auto request = new TL_get_future_salts();
     request->num = 32;
     sendRequest(request, [&, datacenter, id, media](TLObject *response, TL_error *error, int32_t networkType, int64_t responseTime, int64_t msgId, int32_t dcId) {
         auto iter = std::find(requestingSaltsForDc.begin(), requestingSaltsForDc.end(), id);
         if (iter != requestingSaltsForDc.end()) {
             requestingSaltsForDc.erase(iter);
+        }
+        if (requestingSaltsForDc.empty()) {
+            saltRequestStartTime = 0;
         }
         if (response != nullptr) {
             datacenter->mergeServerSalts((TL_future_salts *) response, media);
@@ -3844,6 +3884,7 @@ void ConnectionsManager::resumeNetwork(bool partial) {
             lastMonotonicPauseTime = 0;
             lastSystemPauseTime = 0;
             networkPaused = false;
+            transferPendingSince = 0;  // ZG battery (G-02): a foreground resume restarts the grace period
             if (LOGS_ENABLED) DEBUG_D("wakeup network account%u", instanceNum);
         }
         if (!networkPaused) {
@@ -3914,6 +3955,7 @@ void ConnectionsManager::pauseNetwork() {
     }
     lastMonotonicPauseTime = lastPauseTime = getCurrentTimeMonotonicMillis();
     lastSystemPauseTime = getCurrentTime();
+    transferPendingSince = 0;  // ZG battery (G-02): transfers running at pause time get the full grace period
     saveConfig();
 }
 

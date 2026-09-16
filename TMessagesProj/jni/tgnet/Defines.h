@@ -27,6 +27,16 @@
 #define DOWNLOAD_CONNECTIONS_COUNT 2
 #define UPLOAD_CONNECTIONS_COUNT 4
 #define CONNECTION_BACKGROUND_KEEP_TIME 10000
+// ZG battery (G-02): a *progressing* download/upload legitimately keeps the app out of the paused
+// state; a stalled one must not, or the "lastPauseTime = now" branch in select() pins the 1 Hz
+// native loop, the 28 s generic ping and the 30 s transfer retry on forever. Milliseconds with no
+// byte at all on any download/upload socket after which the transfer is treated as dead and the app
+// is allowed to sleep again; FileLoader re-drives it on the next foreground or network change.
+// Raise this to a very large value to get the stock "never sleep while a transfer object exists".
+#define STALLED_TRANSFER_TIMEOUT 90000
+// Same idea for a get_future_salts that never completes: its id is only erased in the completion
+// callback, so a stuck salt request would otherwise pin the app awake in exactly the same way.
+#define STALLED_SALT_REQUEST_TIMEOUT 60000
 // ZG resume-latency: bounded "fast" connect ladder for generic/temp/genericMedia sockets right after
 // a resume or a network change (see Connection::connect / resetReconnectTimeout). Push keeps its
 // stock 30/20 s budget so the notification path is untouched.
