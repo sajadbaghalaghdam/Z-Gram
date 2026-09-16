@@ -180,6 +180,11 @@ private:
     bool networkPaused = false;
     int32_t nextSleepTimeout = CONNECTION_BACKGROUND_KEEP_TIME;
     int64_t lastPauseTime = 0;
+    // ZG battery (G-02): bounds the "do not sleep because of salt, upload or download request"
+    // branch in select() so a stalled transfer cannot pin the app out of the paused state.
+    int64_t lastTransferActivityTime = 0;  // monotonic ms of the last byte seen on a download/upload socket
+    int64_t transferPendingSince = 0;      // monotonic ms when the sleep check first saw a pending transfer
+    int64_t saltRequestStartTime = 0;      // monotonic ms when the oldest outstanding get_future_salts went out
     int64_t lastMonotonicPauseTime = 0;
     int32_t lastSystemPauseTime = 0;
     ConnectionState connectionState = ConnectionStateConnecting;
