@@ -29,7 +29,7 @@ public final class ZgProxyController {
 
     public static final String PREFS_NAME = "zgconfig";
     public static final String LOCAL_HOST = "127.0.0.1";
-    public static final String DEFAULT_FRAGMENT_SPEC = "tlshello,50-100,10-20";
+    public static final String DEFAULT_FRAGMENT_SPEC = "tlshello,40-80,5-10,4-6";
 
     private static final String KEY_VLESS_URL = "vless_url";
     private static final String KEY_ENABLED = "enabled";

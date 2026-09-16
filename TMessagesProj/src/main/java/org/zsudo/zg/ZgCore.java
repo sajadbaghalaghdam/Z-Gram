@@ -22,7 +22,7 @@ public final class ZgCore {
      *
      * @param vlessUrl     full vless:// link (uuid@host:port?security=reality&...)
      * @param listenPort   port to bind, or 0 to let the core pick a free one
-     * @param fragmentSpec TLS ClientHello fragmentation spec, e.g. "tlshello,50-100,10-20"
+     * @param fragmentSpec TLS ClientHello fragmentation spec, e.g. "tlshello,40-80,5-10,4-6"
      * @return bound port (> 0) on success, negative error code otherwise (see lastError())
      */
     public static native int start(String vlessUrl, int listenPort, String fragmentSpec);
