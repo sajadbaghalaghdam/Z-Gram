@@ -114,3 +114,5 @@
 # Use -keep to explicitly keep any other classes shrinking would remove
 -dontoptimize
 -dontobfuscate
+# ZG: JNI bridge to the Rust proxy core (libzgcore.so); symbol names must survive R8.
+-keep class org.zsudo.zg.ZgCore { *; }

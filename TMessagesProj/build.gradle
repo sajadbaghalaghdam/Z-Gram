@@ -103,7 +103,8 @@ android {
     buildToolsVersion '36.0.0'
     ndkVersion "27.2.12479018"
 
-    sourceSets.main.jniLibs.srcDirs = ['./jni/']
+    // ZG: prebuilt Rust core (libzgcore.so) lives in src/main/jniLibs/<abi>/
+    sourceSets.main.jniLibs.srcDirs = ['./jni/', './src/main/jniLibs/']
 
     externalNativeBuild {
         cmake {

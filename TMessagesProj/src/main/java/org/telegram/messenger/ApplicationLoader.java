@@ -353,6 +353,8 @@ public class ApplicationLoader extends Application {
 
         LauncherIconController.tryFixLauncherIconIfNeeded();
         ProxyRotationController.init();
+        // ZG: bring up the in-process VLESS/REALITY core (if enabled) and point tgnet at it.
+        org.zsudo.zg.ZgProxyController.getInstance().onApplicationStart();
     }
 
     public static void startPushService() {

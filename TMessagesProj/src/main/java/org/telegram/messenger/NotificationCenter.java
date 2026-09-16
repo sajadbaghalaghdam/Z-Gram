@@ -306,6 +306,7 @@ public class NotificationCenter {
     public static final int proxySettingsChanged = totalEvents++;
     public static final int proxyCheckDone = totalEvents++;
     public static final int proxyChangedByRotation = totalEvents++;
+    public static final int zgProxyStateChanged = totalEvents++;
     public static final int liveLocationsChanged = totalEvents++;
     public static final int newLocationAvailable = totalEvents++;
     public static final int liveLocationsCacheChanged = totalEvents++;
