@@ -1305,11 +1305,30 @@ public class MessagesController extends BaseController implements NotificationCe
             return includesDialog(accountInstance, dialogId, dialog);
         }
 
+        /**
+         * ZG perf: exactly what {@code ArrayList<Long>.contains(dialogId)} does, minus the cost.
+         * That call autoboxes the argument (one short-lived allocation) and then walks the list
+         * calling {@code Long.equals(Object)}, which does an instanceof plus an unbox per element.
+         * includesDialog() runs once per dialog inside the sortDialogs() filter loop, so on an
+         * 800-dialog account with a 150-peer include list that was up to 120,000 Long.equals()
+         * calls and 1,600 boxes per sort - and sortDialogs() runs on every folder tab switch and
+         * from 40-odd other call sites. Same linear scan, same answer, no allocation.
+         */
+        private static boolean containsDialogId(ArrayList<Long> list, long dialogId) {
+            for (int i = 0, n = list.size(); i < n; i++) {
+                final Long value = list.get(i);
+                if (value != null && value.longValue() == dialogId) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public boolean includesDialog(AccountInstance accountInstance, long dialogId, TLRPC.Dialog d) {
-            if (neverShow.contains(dialogId)) {
+            if (containsDialogId(neverShow, dialogId)) {
                 return false;
             }
-            if (alwaysShow.contains(dialogId)) {
+            if (containsDialogId(alwaysShow, dialogId)) {
                 return true;
             }
             if (d.folder_id != 0 && (flags & DIALOG_FILTER_FLAG_EXCLUDE_ARCHIVED) != 0) {
@@ -1382,7 +1401,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 }
             }
 
-            return alwaysShow.contains(dialogId);
+            return containsDialogId(alwaysShow, dialogId);
         }
 
         public boolean isDefault() {
