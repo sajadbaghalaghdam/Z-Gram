@@ -2383,6 +2383,15 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             return;
         }
         raiseChat = chatActivity;
+        // ZG battery (F-07): the motion sensors can only do two things - switch a playing voice /
+        // round message to the earpiece, or start a recording when raise-to-speak is enabled.
+        // Without either there is no reason to sample three sensors at ~33 Hz for as long as a
+        // chat is open. raiseChat is kept so playMessage() can start the sensors when playback
+        // actually begins (it already calls startRaiseToEarSensors(raiseChat) for that).
+        final boolean voicePlaying = playingMessageObject != null && (playingMessageObject.isVoice() || playingMessageObject.isRoundVideo());
+        if (!voicePlaying && !SharedConfig.enabledRaiseTo(true)) {
+            return;
+        }
         if (!sensorsStarted) {
             gravity[0] = gravity[1] = gravity[2] = 0;
             linearAcceleration[0] = linearAcceleration[1] = linearAcceleration[2] = 0;
@@ -2420,6 +2429,10 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
             } else {
                 stopRecording(fromChat ? 2 : 0, false, 0, false, 0);
             }
+        }
+        if (!sensorsStarted && raiseChat == chatActivity) {
+            // sensors were never registered for this chat (see startRaiseToEarSensors) - just forget it
+            raiseChat = null;
         }
         if (!sensorsStarted || ignoreOnPause || accelerometerSensor == null && (gravitySensor == null || linearAcceleration == null) || proximitySensor == null || raiseChat != chatActivity) {
             return;
