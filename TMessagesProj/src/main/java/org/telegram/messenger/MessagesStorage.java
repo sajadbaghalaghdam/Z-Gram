@@ -4708,16 +4708,20 @@ public class MessagesStorage extends BaseController {
                         }
                     }
                 }
-                for (int a = 0; a < 2; a++) {
-                    getUserConfig().setDialogsLoadOffset(a,
-                            dialogsLoadOffsetId,
-                            dialogsLoadOffsetDate,
-                            dialogsLoadOffsetUserId,
-                            dialogsLoadOffsetChatId,
-                            dialogsLoadOffsetChannelId,
-                            dialogsLoadOffsetAccess);
-                    getUserConfig().setTotalDialogsCount(a, totalDialogsLoadCount);
-                }
+                getUserConfig().setDialogsLoadOffset(0,
+                        dialogsLoadOffsetId,
+                        dialogsLoadOffsetDate,
+                        dialogsLoadOffsetUserId,
+                        dialogsLoadOffsetChatId,
+                        dialogsLoadOffsetChannelId,
+                        dialogsLoadOffsetAccess);
+                getUserConfig().setTotalDialogsCount(0, totalDialogsLoadCount);
+                // ZG: resetDialogs() deletes the cached dialogs of BOTH folders above and refills
+                // only the first page of folder 0, so folder 1 has to be paged again from the top.
+                // Writing folder 0's offset into folder 1 made the archive resume from a position
+                // inside the MAIN list, permanently skipping every archived chat newer than it.
+                getUserConfig().setDialogsLoadOffset(1, 0, 0, 0, 0, 0, 0);
+                getUserConfig().setTotalDialogsCount(1, 0);
                 getUserConfig().draftsLoaded = false;
                 getUserConfig().saveConfig(false);
                 getMessagesController().completeDialogsReset(dialogsRes, messagesCount, seq, newPts, date, qts, new_dialogs_dict, new_dialogMessage, lastMessage);
