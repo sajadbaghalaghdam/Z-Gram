@@ -8929,8 +8929,28 @@ public class Theme {
         return currentColors.indexOfKey(key) >= 0;
     }
 
+    private static Runnable animatingColorsWatchdog;
+
     public static void setAnimatingColor(boolean animating) {
         animatingColors = animating ? new SparseIntArray() : null;
+        // ZG fix: whoever set the flag is responsible for clearing it when the theme animation
+        // ends, and every one of those paths is guarded by "this animator is still the current
+        // one". A superseded or never-started animator therefore leaks the flag, and the UI stays
+        // frozen on its start colours for the rest of the process. Theme crossfades last ~200 ms,
+        // so a watchdog an order of magnitude longer cannot cut a real animation short.
+        if (animatingColorsWatchdog != null) {
+            AndroidUtilities.cancelRunOnUIThread(animatingColorsWatchdog);
+            animatingColorsWatchdog = null;
+        }
+        if (animating) {
+            AndroidUtilities.runOnUIThread(animatingColorsWatchdog = () -> {
+                animatingColorsWatchdog = null;
+                if (animatingColors != null) {
+                    FileLog.e("ZG: theme colour animation never finished, releasing animatingColors");
+                    animatingColors = null;
+                }
+            }, 3000);
+        }
     }
 
     public static boolean isAnimatingColor() {
@@ -8988,7 +9008,19 @@ public class Theme {
         if (!ignoreAnimation && animatingColors != null) {
             int index = animatingColors.indexOfKey(key);
             if (index >= 0) {
-                return animatingColors.valueAt(index);
+                final int animated = animatingColors.valueAt(index);
+                // ZG fix: a theme crossfade is seeded with setThemeAnimationValue(0f), which pins
+                // every animated key to its captured start colour. If those start colours were
+                // captured as 0 - or if the AnimatorSet never advances past 0 - every background
+                // and every text paint resolves to fully transparent and the whole app renders as
+                // nothing on the black window: no text, no backgrounds, only ImageViews whose
+                // SRC_ATOP tint is a no-op at alpha 0. That is a dead-looking app, so never let a
+                // transparent animated value win; fall through to the real colour instead. A key
+                // that is genuinely transparent resolves to 0 below anyway, and a live crossfade
+                // loses at most its first frame for that key.
+                if (animated != 0) {
+                    return animated;
+                }
             }
         }
         if (serviceBitmapShader != null && (key_chat_serviceText == key || key_chat_serviceLink == key || key_chat_serviceIcon == key
