@@ -92,13 +92,17 @@ public class LiteMode {
     // simultaneously playing Lottie animations), animated reactions, animated chat background
     // (the 60 Hz gradient loop), chat blur, chat scale, spoiler animation, call animations,
     // video autoplay, particles and liquid glass. Every flag stays toggleable in Power Saving.
+    // ZG battery (round two, section 5): FLAG_AUTOPLAY_GIFS also dropped. It was the biggest
+    // remaining screen-on CPU item - every visible GIF or video sticker drives continuous frame
+    // decoding in AnimatedFileDrawable, either on the shared decode pool or on a private OS thread
+    // per drawable, and saturating a big.LITTLE SoC for that is expensive per frame delivered.
+    // Tap-to-play still works and the flag remains toggleable in Settings > Power Saving.
     public static final int ZG_PRESET_BALANCED = (
         FLAG_ANIMATED_STICKERS_CHAT |
         FLAG_ANIMATED_EMOJI_CHAT |
         FLAG_ANIMATED_EMOJI_KEYBOARD |
         FLAG_CHAT_FORUM_TWOCOLUMN |
-        FLAG_CHAT_THANOS |
-        FLAG_AUTOPLAY_GIFS
+        FLAG_CHAT_THANOS
     );
     // Power saving engages at 35% (50% on low-end devices) instead of the stock 10%.
     private static final int ZG_BATTERY_DEFAULT = 35;
