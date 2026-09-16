@@ -68,7 +68,6 @@ android {
             debuggable true
             jniDebuggable true
             signingConfig signingConfigs.debug
-            applicationIdSuffix ".web"
             minifyEnabled false
             multiDexEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), '../TMessagesProj/proguard-rules.pro', '../TMessagesProj/proguard-rules-beta.pro'
@@ -79,7 +78,6 @@ android {
             debuggable false
             jniDebuggable false
             signingConfig signingConfigs.release
-            applicationIdSuffix ".web"
             minifyEnabled true
             multiDexEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), '../TMessagesProj/proguard-rules.pro'
@@ -155,4 +153,11 @@ android {
     }
 }
 
-apply plugin: 'com.google.gms.google-services'
+// ZG: Telegram's google-services.json (kept as google-services.json.telegram) only knows
+// org.telegram.messenger*, and the google-services plugin fails the build when the
+// applicationId has no matching client. Drop a google-services.json for org.zsudo.zg from
+// your own Firebase project into this directory to enable FCM push; without it the plugin
+// is skipped and the app falls back to its own push connection (see docs/telegram-integration.md).
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}
