@@ -13863,7 +13863,10 @@ public class MessagesController extends BaseController implements NotificationCe
                         dialogsEndReached.put(folderId, serverDialogsEndFinal);
                         if (archivedDialogsCount > 0 && archivedDialogsCount < 20 && folderId == 0) {
                             dialogsEndReached.put(1, true);
-                            long[] dialogsLoadOffsetArchived = getUserConfig().getDialogLoadOffsets(folderId);
+                            // ZG: folder 1's own offsets - this branch only runs with folderId == 0,
+                            // so the original getDialogLoadOffsets(folderId) asked folder 0 whether
+                            // the archive was fully loaded.
+                            long[] dialogsLoadOffsetArchived = getUserConfig().getDialogLoadOffsets(1);
                             if (dialogsLoadOffsetArchived[UserConfig.i_dialogsLoadOffsetId] == Integer.MAX_VALUE) {
                                 serverDialogsEndReached.put(1, true);
                             }
