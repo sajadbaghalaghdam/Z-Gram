@@ -16,7 +16,21 @@ public class AutoDeleteMediaTask {
 
     public static Set<String> usingFilePaths = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
+    // ZG (G-08): stock leaves cache_limit at Integer.MAX_VALUE, so the size purge below never runs
+    // and the media cache grows without bound - which is also what makes the daily scan expensive,
+    // because it stats every cached file. 5 GB is one of the values the existing Storage Usage
+    // slider offers, so the user can change it in one tap. CacheControlActivity reads the same
+    // constant, so the slider and the task can never disagree.
+    public static final int DEFAULT_CACHE_LIMIT_GB = 5;
+
     public static void run() {
+        // ZG (G-08): belt and braces. The scan walks every media directory and stats every file;
+        // never start it while the app is in the background with the screen off. run() is only
+        // called from LaunchActivity.checkFreeDiscSpace(), and lastKeepMediaCheckTime is not
+        // written here, so the next foreground pass picks the work up unchanged.
+        if (ApplicationLoader.mainInterfacePaused && !ApplicationLoader.isScreenOn) {
+            return;
+        }
         int time = (int) (System.currentTimeMillis() / 1000);
         if (Math.abs(time - SharedConfig.lastKeepMediaCheckTime) < 24 * 60 * 60) {
             return;
@@ -139,7 +153,7 @@ public class AutoDeleteMediaTask {
                 }
             //}
 
-            int maxCacheGb = SharedConfig.getPreferences().getInt("cache_limit", Integer.MAX_VALUE);
+            int maxCacheGb = SharedConfig.getPreferences().getInt("cache_limit", DEFAULT_CACHE_LIMIT_GB);
             if (maxCacheGb != Integer.MAX_VALUE) {
                 long maxCacheSize;
                 if (maxCacheGb == 1) {

@@ -52,6 +52,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
+import org.telegram.messenger.AutoDeleteMediaTask;
 import org.telegram.messenger.BotWebViewVibrationEffect;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.CacheByChatsController;
@@ -2492,6 +2493,13 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
                     if (totalSizeInGb > 32) {
                         options.add(32);
                     }
+                    // ZG (G-08): the fork defaults cache_limit to DEFAULT_CACHE_LIMIT_GB, so that
+                    // value has to be offered here whatever the device size is - otherwise the
+                    // slider would fall back to showing "No limit" while the task enforces a limit.
+                    if (!options.contains(AutoDeleteMediaTask.DEFAULT_CACHE_LIMIT_GB)) {
+                        options.add(AutoDeleteMediaTask.DEFAULT_CACHE_LIMIT_GB);
+                        Collections.sort(options);
+                    }
                     options.add(Integer.MAX_VALUE);
                     String[] values = new String[options.size()];
                     for (int i = 0; i < options.size(); i++) {
@@ -2506,7 +2514,7 @@ public class CacheControlActivity extends BaseFragment implements NotificationCe
                     slideChooseView2.setCallback(i -> {
                         SharedConfig.getPreferences().edit().putInt("cache_limit", options.get(i)).apply();
                     });
-                    int currentLimit = SharedConfig.getPreferences().getInt("cache_limit", Integer.MAX_VALUE);
+                    int currentLimit = SharedConfig.getPreferences().getInt("cache_limit", AutoDeleteMediaTask.DEFAULT_CACHE_LIMIT_GB);
                     int i = options.indexOf(currentLimit);
                     if (i < 0) {
                         i = options.size() - 1;
