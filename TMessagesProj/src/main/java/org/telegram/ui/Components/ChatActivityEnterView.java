@@ -5914,7 +5914,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 boolean allowChangeToSmile = true;
                 int currentPage;
                 if (emojiView == null) {
-                    currentPage = MessagesController.getGlobalEmojiSettings().getInt("selected_page", 0);
+                    currentPage = EmojiView.getSelectedPage();
                 } else {
                     currentPage = emojiView.getCurrentPage();
                 }
@@ -12938,7 +12938,7 @@ public class ChatActivityEnterView extends FrameLayout implements
         } else {
             int currentPage;
             if (emojiView == null) {
-                currentPage = MessagesController.getGlobalEmojiSettings().getInt("selected_page", 0);
+                currentPage = EmojiView.getSelectedPage();
             } else {
                 currentPage = emojiView.getCurrentPage();
             }
