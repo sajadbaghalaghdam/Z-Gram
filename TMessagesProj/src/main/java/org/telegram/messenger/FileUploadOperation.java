@@ -543,7 +543,13 @@ public class FileUploadOperation {
         if (slowNetwork) {
             connectionType = ConnectionsManager.ConnectionTypeUpload;
         } else {
-            connectionType = ConnectionsManager.ConnectionTypeUpload | ((requestNumFinal % 4) << 16);
+            // ZG battery (F-16, round-two reframe): spreading parts over four upload sockets reads
+            // very differently through a tunnel. Each upload socket is a separate TCP + SOCKS5 +
+            // REALITY TLS 1.3 handshake, so sending one photo pays four of them. Two sockets keep
+            // the pipelining that actually matters - MTProto already has several parts in flight
+            // per socket - and halve the handshakes. A direct connection keeps the stock four.
+            final int uploadSockets = SharedConfig.isProxyEnabled() ? 2 : 4;
+            connectionType = ConnectionsManager.ConnectionTypeUpload | ((requestNumFinal % uploadSockets) << 16);
         }
         long time = System.currentTimeMillis();
         int[] requestToken = new int[1];
