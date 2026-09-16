@@ -884,7 +884,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
             zgEndRow = -1;
         }
         proxyAddRow = rowCount++;
-        zgStatusRow = zgConfigs.isEmpty() ? -1 : rowCount++;
+        zgStatusRow = rowCount++;
         proxyShadowRow = rowCount++;
         if (SharedConfig.currentProxy == null || SharedConfig.currentProxy.secret.isEmpty()) {
             boolean change = callsRow == -1;
@@ -1134,7 +1134,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                     TextSettingsCell textCell = (TextSettingsCell) holder.itemView;
                     textCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
                     if (position == proxyAddRow) {
-                        textCell.setText(getString(R.string.AddProxy), zgStatusRow != -1 || deleteAllRow != -1);
+                        textCell.setText(getString(R.string.AddProxy), true);
                     } else if (position == zgStatusRow) {
                         textCell.setTextAndValue(getString(R.string.ZgProxy), getString(zgController.isEnabled() ? R.string.ZgOn : R.string.ZgOff), deleteAllRow != -1);
                     } else if (position == deleteAllRow) {
