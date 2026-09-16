@@ -344,8 +344,22 @@ void ConnectionsManager::select() {
             // background wake-ups do not emit a generic ping at all. The interval is always
             // shorter than the window declared by the previous ping in either state.
             if (llabs(now - lastPingTime) >= (testBackend ? 2000 : (lastPauseTime != 0 ? 28000 : 19000))) {
-                lastPingTime = now;
-                sendPing(datacenter, false);
+                // ZG battery (G-01): while the app is paused the generic socket is normally already
+                // suspended, and sendPing() would *create* and connect it (Datacenter::getGenericConnection
+                // with create = true) only to bail out immediately because the connection token is
+                // still 0 - i.e. one full TCP + SOCKS5 + REALITY TLS 1.3 handshake through zg-core
+                // per background nudge, torn down again by suspendConnections() at the end of the
+                // CONNECTION_BACKGROUND_KEEP_TIME window, having sent nothing. Every posted or
+                // updated notification triggers such a nudge via resumeNetworkMaybe(), so this ran
+                // hundreds of times a day. Only ping a socket that is actually up while paused;
+                // anything that genuinely needs the generic socket still creates it on demand
+                // through processRequestQueue (getDifference, readHistory, getAppConfig, ...).
+                Connection *genericForPing = datacenter->getGenericConnection(false, 0);
+                bool genericForPingAlive = genericForPing != nullptr && genericForPing->getConnectionToken() != 0;
+                if (lastPauseTime == 0 || genericForPingAlive) {
+                    lastPingTime = now;
+                    sendPing(datacenter, false);
+                }
             }
             if (abs((int32_t) (now / 1000) - lastDcUpdateTime) >= DC_UPDATE_TIME) {
                 updateDcSettings(0, false, false);
