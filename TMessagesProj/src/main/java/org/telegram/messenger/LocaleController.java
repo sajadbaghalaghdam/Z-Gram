@@ -1430,18 +1430,8 @@ public class LocaleController {
         return getStringInternal(key, null, 0, res);
     }
 
-    /**
-     * ZG: keys whose value must never come from the server's translation bundle.
-     * Telegram's cloud strings carry "Telegram" for AppName, so a fork that renames itself
-     * locally still shows Telegram's name everywhere the app refers to itself once the
-     * translations have been downloaded. The fork's own name is not a translatable string.
-     */
-    private static boolean isForkOwnedString(String key) {
-        return "AppName".equals(key) || "ZgAppName".equals(key);
-    }
-
     private String getStringInternal(String key, String fallback, int fallbackRes, int res) {
-        String value = BuildVars.USE_CLOUD_STRINGS && !isForkOwnedString(key) ? localeValues.get(key) : null;
+        String value = BuildVars.USE_CLOUD_STRINGS ? localeValues.get(key) : null;
         if (value == null) {
             if (BuildVars.USE_CLOUD_STRINGS && fallback != null) {
                 value = localeValues.get(fallback);
