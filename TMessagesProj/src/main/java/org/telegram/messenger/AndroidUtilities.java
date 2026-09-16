@@ -3239,6 +3239,43 @@ public class AndroidUtilities {
         return src;
     }
 
+    /**
+     * Allocation-free equivalent of {@code !TextUtils.isEmpty(cs.toString().trim())}.
+     * String.trim() strips every character &lt;= ' ', so its result is non-empty exactly when the
+     * sequence holds at least one character &gt; ' '. Early-exits on the first one, so in practice
+     * this is O(1) where the old expression was a full copy plus a second copy from trim().
+     */
+    public static boolean hasNonSpace(CharSequence cs) {
+        if (cs == null) {
+            return false;
+        }
+        for (int i = 0, n = cs.length(); i < n; i++) {
+            if (cs.charAt(i) > ' ') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Allocation-free equivalent of {@code getTrimmedString(cs).length() == 0}.
+     * Note this is deliberately NOT the same test as {@link #hasNonSpace(CharSequence)}:
+     * getTrimmedString above strips only '\n' and ' ', not every character &lt;= ' ', so its
+     * result is empty exactly when every character is one of those two.
+     */
+    public static boolean isTrimmedStringEmpty(CharSequence cs) {
+        if (cs == null) {
+            return true;
+        }
+        for (int i = 0, n = cs.length(); i < n; i++) {
+            final char c = cs.charAt(i);
+            if (c != '\n' && c != ' ') {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public static void setViewPagerEdgeEffectColor(ViewPager viewPager, int color) {
         try {
             Field field = ViewPager.class.getDeclaredField("mLeftEdge");
