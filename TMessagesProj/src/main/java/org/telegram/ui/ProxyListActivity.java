@@ -67,6 +67,8 @@ import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.NumberTextView;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.SlideChooseView;
+import org.zsudo.zg.ZgProxyController;
+import org.zsudo.zg.ZgSettingsActivity;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -88,6 +90,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
     private boolean useProxyForCalls;
 
     private int rowCount;
+    private int zgRow;
+    private int zgShadowRow;
     @Keep
     private int useProxyRow;
     private int useProxyShadowRow;
@@ -339,6 +343,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.proxyChangedByRotation);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.proxySettingsChanged);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.proxyCheckDone);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.zgProxyStateChanged);
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.didUpdateConnectionState);
 
         final SharedPreferences preferences = MessagesController.getGlobalMainSettings();
@@ -356,6 +361,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.proxyChangedByRotation);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.proxySettingsChanged);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.proxyCheckDone);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.zgProxyStateChanged);
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.didUpdateConnectionState);
     }
 
@@ -393,7 +399,9 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT));
         listView.setAdapter(listAdapter);
         listView.setOnItemClickListener((view, position) -> {
-            if (position == useProxyRow) {
+            if (position == zgRow) {
+                presentFragment(new ZgSettingsActivity());
+            } else if (position == useProxyRow) {
                 if (SharedConfig.currentProxy == null) {
                     if (!proxyList.isEmpty()) {
                         SharedConfig.currentProxy = proxyList.get(0);
@@ -627,6 +635,8 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
 
     private void updateRows(boolean notify) {
         rowCount = 0;
+        zgRow = rowCount++;
+        zgShadowRow = rowCount++;
         useProxyRow = rowCount++;
         if (useProxySettings && SharedConfig.currentProxy != null && SharedConfig.proxyList.size() > 1 && IS_PROXY_ROTATION_AVAILABLE) {
             rotationRow = rowCount++;
@@ -767,6 +777,10 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
             });
 
             updateRows(false);
+        } else if (id == NotificationCenter.zgProxyStateChanged) {
+            if (listAdapter != null) {
+                listAdapter.notifyItemChanged(zgRow);
+            }
         } else if (id == NotificationCenter.proxySettingsChanged) {
             updateRows(true);
         } else if (id == NotificationCenter.didUpdateConnectionState) {
@@ -889,7 +903,9 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
                 case VIEW_TYPE_TEXT_SETTING: {
                     TextSettingsCell textCell = (TextSettingsCell) holder.itemView;
                     textCell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-                    if (position == proxyAddRow) {
+                    if (position == zgRow) {
+                        textCell.setTextAndValue(getString(R.string.ZgProxy), getString(ZgProxyController.getInstance().isEnabled() ? R.string.ZgOn : R.string.ZgOff), false);
+                    } else if (position == proxyAddRow) {
                         textCell.setText(getString(R.string.AddProxy), deleteAllRow != -1);
                     } else if (position == deleteAllRow) {
                         textCell.setTextColor(Theme.getColor(Theme.key_text_RedRegular));
@@ -996,7 +1012,7 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == useProxyRow || position == rotationRow || position == callsRow || position == proxyAddRow || position == deleteAllRow || position >= proxyStartRow && position < proxyEndRow;
+            return position == zgRow || position == useProxyRow || position == rotationRow || position == callsRow || position == proxyAddRow || position == deleteAllRow || position >= proxyStartRow && position < proxyEndRow;
         }
 
         @Override
@@ -1038,7 +1054,11 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
         @Override
         public long getItemId(int position) {
             // Random stable ids, could be anything non-repeating
-            if (position == useProxyShadowRow) {
+            if (position == zgRow) {
+                return -12;
+            } else if (position == zgShadowRow) {
+                return -13;
+            } else if (position == useProxyShadowRow) {
                 return -1;
             } else if (position == proxyShadowRow) {
                 return -2;
@@ -1067,9 +1087,9 @@ public class ProxyListActivity extends BaseFragment implements NotificationCente
 
         @Override
         public int getItemViewType(int position) {
-            if (position == useProxyShadowRow || position == proxyShadowRow) {
+            if (position == useProxyShadowRow || position == proxyShadowRow || position == zgShadowRow) {
                 return VIEW_TYPE_SHADOW;
-            } else if (position == proxyAddRow || position == deleteAllRow) {
+            } else if (position == proxyAddRow || position == deleteAllRow || position == zgRow) {
                 return VIEW_TYPE_TEXT_SETTING;
             } else if (position == useProxyRow || position == rotationRow || position == callsRow) {
                 return VIEW_TYPE_TEXT_CHECK;

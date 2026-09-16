@@ -2669,6 +2669,37 @@
     <string name="SegmentationRestore">Restore</string>
     <string name="EditPack">edit</string>
     <string name="PasteFromClipboard">Paste from clipboard</string>
+    <!-- ZG: built-in VLESS/REALITY tunnel -->
+    <string name="ZgProxy">ZG Proxy</string>
+    <string name="ZgEnable">Use ZG tunnel</string>
+    <string name="ZgOn">On</string>
+    <string name="ZgOff">Off</string>
+    <string name="ZgVlessLink">VLESS link</string>
+    <string name="ZgVlessLinkNotSet">Not set</string>
+    <string name="ZgVlessLinkHint">vless://…</string>
+    <string name="ZgVlessLinkInfo">Paste the vless:// link of your own REALITY server. It must contain security=reality, for example:\nvless://&lt;uuid&gt;@example.com:443?security=reality&amp;sni=example.com&amp;pbk=&lt;key&gt;&amp;fp=chrome</string>
+    <string name="ZgVlessLinkInvalid">This is not a valid link. It must start with vless:// and contain security=reality.</string>
+    <string name="ZgFragmentSpec">Fragment spec</string>
+    <string name="ZgFragmentSpecInfo">TLS ClientHello fragmentation as what,size-range,delay-range. Leave the default unless your network needs different values.</string>
+    <string name="ZgListenPort">Local port</string>
+    <string name="ZgListenPortAuto">Automatic</string>
+    <string name="ZgListenPortInfo">Port of the local SOCKS5 listener on 127.0.0.1. Enter 0 to let ZG pick a free port.</string>
+    <string name="ZgListenPortInvalid">Enter a port between 0 and 65535.</string>
+    <string name="ZgInfo">ZG runs a VLESS/REALITY tunnel inside the app and registers it as a SOCKS5 proxy on 127.0.0.1. There is no background service: the tunnel starts with the app and stops with it. Turning it on makes it the active proxy; turning it off removes the entry again.</string>
+    <string name="ZgStatus">Status</string>
+    <string name="ZgStatusRunning">Running on %1$s</string>
+    <string name="ZgStatusStopped">Stopped</string>
+    <string name="ZgStatusStarting">Starting…</string>
+    <string name="ZgStatusUnavailable">Unavailable: native core not found</string>
+    <string name="ZgStatusError">Error</string>
+    <string name="ZgRouting">Telegram traffic</string>
+    <string name="ZgRoutingThroughZg">Through ZG</string>
+    <string name="ZgRoutingDirect">Not through ZG</string>
+    <string name="ZgVersion">Core version</string>
+    <string name="ZgStats">Connections</string>
+    <string name="ZgStatsValue">%1$d active, up %2$s, down %3$s</string>
+    <string name="ZgLastError">Last error: %1$s</string>
+    <string name="ZgStartFailed">ZG could not start</string>
     <string name="ProxySettings">Proxy Settings</string>
     <string name="ProxyDetails">Proxy Details</string>
     <string name="Proxy">Proxy</string>
