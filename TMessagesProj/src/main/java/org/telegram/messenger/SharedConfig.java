@@ -283,6 +283,10 @@ public class SharedConfig {
     public static boolean chatBubbles = Build.VERSION.SDK_INT >= 30;
     public static boolean raiseToSpeak = false;
     public static boolean raiseToListen = true;
+    // ZG battery (F-08): whether windows ask for the panel's maximum refresh rate or leave it to the system
+    public static final int ZG_REFRESH_RATE_ADAPTIVE = 0;
+    public static final int ZG_REFRESH_RATE_MAX = 1;
+    public static int zgRefreshRateMode = ZG_REFRESH_RATE_ADAPTIVE;
     public static boolean nextMediaTap = true;
     public static boolean recordViaSco = false;
     public static boolean adaptableColorInBrowser = true;
@@ -589,6 +593,7 @@ public class SharedConfig {
             searchEngineType = preferences.getInt("searchEngineType", 0);
             raiseToListen = preferences.getBoolean("raise_to_listen", true);
             raiseToSpeak = preferences.getBoolean("raise_to_speak", false);
+            zgRefreshRateMode = preferences.getInt("zg_refresh_rate_mode", ZG_REFRESH_RATE_ADAPTIVE);
             nextMediaTap = preferences.getBoolean("next_media_on_tap", true);
             recordViaSco = preferences.getBoolean("record_via_sco", false);
             adaptableColorInBrowser = preferences.getBoolean("adaptableBrowser", false);
@@ -1248,6 +1253,14 @@ public class SharedConfig {
         SharedPreferences preferences = MessagesController.getGlobalMainSettings();
         SharedPreferences.Editor editor = preferences.edit();
         editor.putBoolean("raise_to_speak", raiseToSpeak);
+        editor.apply();
+    }
+
+    public static void setZgRefreshRateMode(int mode) {
+        zgRefreshRateMode = mode;
+        SharedPreferences preferences = MessagesController.getGlobalMainSettings();
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putInt("zg_refresh_rate_mode", zgRefreshRateMode);
         editor.apply();
     }
 

@@ -21,6 +21,7 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
@@ -60,6 +61,10 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
     private int statsRow;
     private int statusShadowRow;
     private int errorInfoRow;
+    private int batteryHeaderRow;
+    private int refreshRateRow;
+    private int refreshRateInfoRow;
+    private int batteryDefaultsInfoRow;
 
     private final ZgProxyController controller = ZgProxyController.getInstance();
 
@@ -140,6 +145,8 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                 editFragmentSpec();
             } else if (position == portRow) {
                 editPort();
+            } else if (position == refreshRateRow) {
+                chooseRefreshRate();
             }
         });
 
@@ -224,6 +231,26 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         });
     }
 
+    private void chooseRefreshRate() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        String[] options = new String[]{getString(R.string.ZgRefreshRateAdaptive), getString(R.string.ZgRefreshRateMax)};
+        showDialog(AlertsCreator.createSingleChoiceDialog(getParentActivity(), options, getString(R.string.ZgRefreshRate), SharedConfig.zgRefreshRateMode, (dialog, which) -> {
+            SharedConfig.setZgRefreshRateMode(which == 1 ? SharedConfig.ZG_REFRESH_RATE_MAX : SharedConfig.ZG_REFRESH_RATE_ADAPTIVE);
+            if (getParentActivity() != null) {
+                if (SharedConfig.zgRefreshRateMode == SharedConfig.ZG_REFRESH_RATE_MAX) {
+                    AndroidUtilities.setPreferredMaxRefreshRate(getParentActivity().getWindow());
+                } else {
+                    AndroidUtilities.clearPreferredRefreshRate(getParentActivity().getWindow());
+                }
+            }
+            if (listAdapter != null) {
+                listAdapter.notifyItemChanged(refreshRateRow);
+            }
+        }));
+    }
+
     private void updateRows() {
         rowCount = 0;
         enableRow = rowCount++;
@@ -247,6 +274,10 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
             statusShadowRow = rowCount++;
             errorInfoRow = -1;
         }
+        batteryHeaderRow = rowCount++;
+        refreshRateRow = rowCount++;
+        refreshRateInfoRow = rowCount++;
+        batteryDefaultsInfoRow = rowCount++;
         if (listAdapter != null) {
             listAdapter.notifyDataSetChanged();
         }
@@ -327,7 +358,7 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == enableRow || position == linkRow || position == fragmentRow || position == portRow;
+            return position == enableRow || position == linkRow || position == fragmentRow || position == portRow || position == refreshRateRow;
         }
 
         @Override
@@ -374,6 +405,8 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                         cell.setText(getString(R.string.ZgProxy));
                     } else if (position == statusHeaderRow) {
                         cell.setText(getString(R.string.ZgStatus));
+                    } else if (position == batteryHeaderRow) {
+                        cell.setText(getString(R.string.ZgBattery));
                     }
                     break;
                 }
@@ -396,6 +429,8 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                         cell.setTextAndValue(getString(R.string.ZgVersion), TextUtils.isEmpty(version) ? "—" : version, true);
                     } else if (position == statsRow) {
                         cell.setTextAndValue(getString(R.string.ZgStats), statsText(), false);
+                    } else if (position == refreshRateRow) {
+                        cell.setTextAndValue(getString(R.string.ZgRefreshRate), getString(SharedConfig.zgRefreshRateMode == SharedConfig.ZG_REFRESH_RATE_MAX ? R.string.ZgRefreshRateMax : R.string.ZgRefreshRateAdaptive), false);
                     }
                     break;
                 }
@@ -412,6 +447,10 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                     } else if (position == errorInfoRow) {
                         String error = controller.isNativeAvailable() ? controller.getLastError() : controller.getNativeLoadError();
                         cell.setText(LocaleController.formatString(R.string.ZgLastError, error));
+                    } else if (position == refreshRateInfoRow) {
+                        cell.setText(getString(R.string.ZgRefreshRateInfo));
+                    } else if (position == batteryDefaultsInfoRow) {
+                        cell.setText(getString(R.string.ZgBatteryDefaultsInfo));
                     }
                     break;
                 }
@@ -432,9 +471,9 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         public int getItemViewType(int position) {
             if (position == enableRow) {
                 return VIEW_TYPE_TEXT_CHECK;
-            } else if (position == settingsHeaderRow || position == statusHeaderRow) {
+            } else if (position == settingsHeaderRow || position == statusHeaderRow || position == batteryHeaderRow) {
                 return VIEW_TYPE_HEADER;
-            } else if (position == linkRow || position == fragmentRow || position == portRow || position == statusRow || position == routingRow || position == versionRow || position == statsRow) {
+            } else if (position == linkRow || position == fragmentRow || position == portRow || position == statusRow || position == routingRow || position == versionRow || position == statsRow || position == refreshRateRow) {
                 return VIEW_TYPE_TEXT_SETTING;
             } else if (position == statusShadowRow) {
                 return VIEW_TYPE_SHADOW;

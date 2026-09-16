@@ -2815,11 +2815,20 @@ public class AndroidUtilities {
         }
     }
 
+    // ZG battery (F-08): pinning preferredRefreshRate to the panel maximum defeats LTPO / adaptive
+    // refresh on static content (a chat you are reading). Under the default "Adaptive" mode every
+    // request for the maximum rate is a no-op and the platform picks the rate.
+    private static boolean forceMaxRefreshRate() {
+        return SharedConfig.zgRefreshRateMode == SharedConfig.ZG_REFRESH_RATE_MAX;
+    }
+
     public static void setPreferredMaxRefreshRate(Window window) {
+        if (!forceMaxRefreshRate()) return;
         setPreferredMaxRefreshRate(window, screenMaxRefreshRate);
     }
 
     public static void setPreferredMaxRefreshRate(Window window, float rate) {
+        if (!forceMaxRefreshRate()) return;
         if (window == null) return;
         final WindowManager wm = window.getWindowManager();
         if (wm == null) return;
@@ -2832,7 +2841,22 @@ public class AndroidUtilities {
         }
     }
 
+    public static void clearPreferredRefreshRate(Window window) {
+        if (window == null) return;
+        final WindowManager wm = window.getWindowManager();
+        if (wm == null) return;
+        WindowManager.LayoutParams params = window.getAttributes();
+        if (params.preferredRefreshRate == 0) return;
+        params.preferredRefreshRate = 0;
+        try {
+            wm.updateViewLayout(window.getDecorView(), params);
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
+
     public static void setPreferredMaxRefreshRate(WindowManager wm, View windowView, WindowManager.LayoutParams params) {
+        if (!forceMaxRefreshRate()) return;
         if (wm == null) return;
         if (Math.abs(params.preferredRefreshRate - screenMaxRefreshRate) > 0.2) {
             params.preferredRefreshRate = screenMaxRefreshRate;
