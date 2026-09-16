@@ -296,7 +296,11 @@ void ConnectionsManager::select() {
     }
     if (datacenter != nullptr) {
         if (datacenter->hasAuthKey(ConnectionTypeGeneric, 1)) {
-            if (llabs(now - lastPingTime) >= (testBackend ? 2000 : 19000)) {
+            // ZG battery (F-15): while the app is paused the generic socket is pinged every 28 s
+            // with a 60 s server-side window (see sendPing) instead of 19 s / 35 s, so most short
+            // background wake-ups do not emit a generic ping at all. The interval is always
+            // shorter than the window declared by the previous ping in either state.
+            if (llabs(now - lastPingTime) >= (testBackend ? 2000 : (lastPauseTime != 0 ? 28000 : 19000))) {
                 lastPingTime = now;
                 sendPing(datacenter, false);
             }
@@ -1787,7 +1791,7 @@ void ConnectionsManager::sendPing(Datacenter *datacenter, bool usePushConnection
         request->disconnect_delay = 60 * 7;
         sendingPushPingTime = getCurrentTimeMonotonicMillis();
     } else {
-        request->disconnect_delay = testBackend ? 10 : 35;
+        request->disconnect_delay = testBackend ? 10 : (lastPauseTime != 0 ? 60 : 35);
         pingTimeMs = getCurrentTimeMonotonicMillis();
         pingTime = (int32_t) (pingTimeMs / 1000);
     }
