@@ -1,6 +1,9 @@
 /*
- * ZG: settings screen for the built-in VLESS/REALITY tunnel.
+ * ZG: status and tunnel settings of the built-in VLESS/REALITY core.
  * Reachable from Settings -> Data and Storage -> Proxy Settings -> "ZG Proxy".
+ *
+ * The servers themselves live in the proxy list (ZgConfigActivity adds and edits them); this
+ * screen only shows what the core is doing and the settings that are not per-server.
  */
 
 package org.zsudo.zg;
@@ -28,7 +31,6 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.ActionBar.ThemeDescription;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.ShadowSectionCell;
-import org.telegram.ui.Cells.TextCheckCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.AlertsCreator;
@@ -45,22 +47,19 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
     private RecyclerListView listView;
 
     private int rowCount;
-    private int enableRow;
-    private int enableInfoRow;
-    private int settingsHeaderRow;
-    private int linkRow;
-    private int linkInfoRow;
-    private int fragmentRow;
-    private int fragmentInfoRow;
-    private int portRow;
-    private int portInfoRow;
     private int statusHeaderRow;
+    private int serverRow;
     private int statusRow;
     private int routingRow;
     private int versionRow;
     private int statsRow;
     private int statusShadowRow;
     private int errorInfoRow;
+    private int tunnelHeaderRow;
+    private int fragmentRow;
+    private int fragmentInfoRow;
+    private int portRow;
+    private int portInfoRow;
     private int batteryHeaderRow;
     private int refreshRateRow;
     private int refreshRateInfoRow;
@@ -137,11 +136,7 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT));
         listView.setAdapter(listAdapter);
         listView.setOnItemClickListener((view, position) -> {
-            if (position == enableRow) {
-                toggleEnabled((TextCheckCell) view);
-            } else if (position == linkRow) {
-                editLink();
-            } else if (position == fragmentRow) {
+            if (position == fragmentRow) {
                 editFragmentSpec();
             } else if (position == portRow) {
                 editPort();
@@ -160,41 +155,15 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         showDialog(AlertsCreator.createSimpleAlert(getParentActivity(), title, text).create());
     }
 
-    private void toggleEnabled(TextCheckCell cell) {
-        if (controller.isBusy()) {
-            return;
-        }
-        boolean enable = !controller.isEnabled();
-        if (enable && !ZgProxyController.isValidVlessUrl(controller.getVlessUrl())) {
-            showError(getString(R.string.ZgProxy), getString(R.string.ZgVlessLinkInvalid));
-            return;
-        }
-        cell.setChecked(enable);
-        updateStatusRows();
-        controller.setEnabled(enable, (running, error) -> {
+    private void restartAfterSettingsChange() {
+        controller.restartActive((running, error) -> {
             if (listAdapter == null) {
                 return;
             }
-            listAdapter.notifyItemChanged(enableRow, ListAdapter.PAYLOAD_CHECKED_CHANGED);
             updateRows();
-            if (enable && !running) {
-                showError(getString(R.string.ZgStartFailed), TextUtils.isEmpty(error) ? getString(R.string.ZgStatusError) : error);
+            if (!running && !TextUtils.isEmpty(error)) {
+                showError(getString(R.string.ZgStartFailed), error);
             }
-        });
-    }
-
-    private void editLink() {
-        if (getParentActivity() == null) {
-            return;
-        }
-        AlertsCreator.createSimpleTextInputAlert(getParentActivity(), this, getString(R.string.ZgVlessLink), getString(R.string.ZgVlessLinkInfo), getString(R.string.ZgVlessLinkHint), controller.getVlessUrl(), 4096, getString(R.string.Save), getResourceProvider(), text -> {
-            if (!ZgProxyController.isValidVlessUrl(text)) {
-                showError(getString(R.string.ZgProxy), getString(R.string.ZgVlessLinkInvalid));
-                return;
-            }
-            controller.setVlessUrl(text);
-            listAdapter.notifyItemChanged(linkRow);
-            controller.restartIfEnabled(null);
         });
     }
 
@@ -202,10 +171,10 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         if (getParentActivity() == null) {
             return;
         }
-        AlertsCreator.createSimpleTextInputAlert(getParentActivity(), this, getString(R.string.ZgFragmentSpec), getString(R.string.ZgFragmentSpecInfo), ZgProxyController.DEFAULT_FRAGMENT_SPEC, controller.getFragmentSpec(), 128, getString(R.string.Save), getResourceProvider(), text -> {
-            controller.setFragmentSpec(text);
+        AlertsCreator.createSimpleTextInputAlert(getParentActivity(), this, getString(R.string.ZgFragmentSpec), getString(R.string.ZgFragmentSpecInfo), ZgProxyController.DEFAULT_FRAGMENT_SPEC, controller.getActiveFragmentSpec(), 128, getString(R.string.Save), getResourceProvider(), text -> {
+            controller.setActiveFragmentSpec(text);
             listAdapter.notifyItemChanged(fragmentRow);
-            controller.restartIfEnabled(null);
+            restartAfterSettingsChange();
         });
     }
 
@@ -227,7 +196,7 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
             }
             controller.setListenPort(port);
             listAdapter.notifyItemChanged(portRow);
-            controller.restartIfEnabled(null);
+            restartAfterSettingsChange();
         });
     }
 
@@ -253,16 +222,8 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
 
     private void updateRows() {
         rowCount = 0;
-        enableRow = rowCount++;
-        enableInfoRow = rowCount++;
-        settingsHeaderRow = rowCount++;
-        linkRow = rowCount++;
-        linkInfoRow = rowCount++;
-        fragmentRow = rowCount++;
-        fragmentInfoRow = rowCount++;
-        portRow = rowCount++;
-        portInfoRow = rowCount++;
         statusHeaderRow = rowCount++;
+        serverRow = rowCount++;
         statusRow = rowCount++;
         routingRow = rowCount++;
         versionRow = rowCount++;
@@ -274,6 +235,11 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
             statusShadowRow = rowCount++;
             errorInfoRow = -1;
         }
+        tunnelHeaderRow = rowCount++;
+        fragmentRow = rowCount++;
+        fragmentInfoRow = rowCount++;
+        portRow = rowCount++;
+        portInfoRow = rowCount++;
         batteryHeaderRow = rowCount++;
         refreshRateRow = rowCount++;
         refreshRateInfoRow = rowCount++;
@@ -281,13 +247,6 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         if (listAdapter != null) {
             listAdapter.notifyDataSetChanged();
         }
-    }
-
-    private void updateStatusRows() {
-        if (listAdapter == null) {
-            return;
-        }
-        listAdapter.notifyItemRangeChanged(statusRow, 4);
     }
 
     @Override
@@ -321,28 +280,16 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         return LocaleController.formatString(R.string.ZgStatsValue, (int) stats[0], AndroidUtilities.formatFileSize(stats[1]), AndroidUtilities.formatFileSize(stats[2]));
     }
 
-    private String linkValueText() {
-        String url = controller.getVlessUrl();
-        if (TextUtils.isEmpty(url)) {
-            return getString(R.string.ZgVlessLinkNotSet);
-        }
-        // never show the uuid in the list: only host:port after '@'
-        int at = url.indexOf('@');
-        int q = url.indexOf('?');
-        if (at > 0) {
-            return url.substring(at + 1, q > at ? q : url.length());
-        }
-        return "vless://…";
+    private String serverText() {
+        ZgConfig config = controller.getActiveConfig();
+        return config == null ? getString(R.string.ZgServerNone) : config.getTitle();
     }
 
     private class ListAdapter extends RecyclerListView.SelectionAdapter {
         private static final int VIEW_TYPE_SHADOW = 0;
         private static final int VIEW_TYPE_TEXT_SETTING = 1;
         private static final int VIEW_TYPE_HEADER = 2;
-        private static final int VIEW_TYPE_TEXT_CHECK = 3;
-        private static final int VIEW_TYPE_INFO = 4;
-
-        public static final int PAYLOAD_CHECKED_CHANGED = 0;
+        private static final int VIEW_TYPE_INFO = 3;
 
         private final Context mContext;
 
@@ -358,7 +305,7 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == enableRow || position == linkRow || position == fragmentRow || position == portRow || position == refreshRateRow;
+            return position == fragmentRow || position == portRow || position == refreshRateRow;
         }
 
         @Override
@@ -376,10 +323,6 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                     view = new HeaderCell(mContext);
                     view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                     break;
-                case VIEW_TYPE_TEXT_CHECK:
-                    view = new TextCheckCell(mContext);
-                    view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
-                    break;
                 case VIEW_TYPE_INFO:
                 default:
                     view = new TextInfoPrivacyCell(mContext);
@@ -392,19 +335,12 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         @Override
         public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
             switch (holder.getItemViewType()) {
-                case VIEW_TYPE_TEXT_CHECK: {
-                    TextCheckCell cell = (TextCheckCell) holder.itemView;
-                    if (position == enableRow) {
-                        cell.setTextAndCheck(getString(R.string.ZgEnable), controller.isEnabled(), false);
-                    }
-                    break;
-                }
                 case VIEW_TYPE_HEADER: {
                     HeaderCell cell = (HeaderCell) holder.itemView;
-                    if (position == settingsHeaderRow) {
-                        cell.setText(getString(R.string.ZgProxy));
-                    } else if (position == statusHeaderRow) {
+                    if (position == statusHeaderRow) {
                         cell.setText(getString(R.string.ZgStatus));
+                    } else if (position == tunnelHeaderRow) {
+                        cell.setText(getString(R.string.ZgTunnel));
                     } else if (position == batteryHeaderRow) {
                         cell.setText(getString(R.string.ZgBattery));
                     }
@@ -413,13 +349,8 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                 case VIEW_TYPE_TEXT_SETTING: {
                     TextSettingsCell cell = (TextSettingsCell) holder.itemView;
                     cell.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-                    if (position == linkRow) {
-                        cell.setTextAndValue(getString(R.string.ZgVlessLink), linkValueText(), false);
-                    } else if (position == fragmentRow) {
-                        cell.setTextAndValue(getString(R.string.ZgFragmentSpec), controller.getFragmentSpec(), false);
-                    } else if (position == portRow) {
-                        int port = controller.getListenPort();
-                        cell.setTextAndValue(getString(R.string.ZgListenPort), port > 0 ? String.valueOf(port) : getString(R.string.ZgListenPortAuto), false);
+                    if (position == serverRow) {
+                        cell.setTextAndValue(getString(R.string.ZgServer), serverText(), true);
                     } else if (position == statusRow) {
                         cell.setTextAndValue(getString(R.string.ZgStatus), statusText(), true);
                     } else if (position == routingRow) {
@@ -429,6 +360,11 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                         cell.setTextAndValue(getString(R.string.ZgVersion), TextUtils.isEmpty(version) ? "—" : version, true);
                     } else if (position == statsRow) {
                         cell.setTextAndValue(getString(R.string.ZgStats), statsText(), false);
+                    } else if (position == fragmentRow) {
+                        cell.setTextAndValue(getString(R.string.ZgFragmentSpec), controller.getActiveFragmentSpec(), false);
+                    } else if (position == portRow) {
+                        int port = controller.getListenPort();
+                        cell.setTextAndValue(getString(R.string.ZgListenPort), port > 0 ? String.valueOf(port) : getString(R.string.ZgListenPortAuto), false);
                     } else if (position == refreshRateRow) {
                         cell.setTextAndValue(getString(R.string.ZgRefreshRate), getString(SharedConfig.zgRefreshRateMode == SharedConfig.ZG_REFRESH_RATE_MAX ? R.string.ZgRefreshRateMax : R.string.ZgRefreshRateAdaptive), false);
                     }
@@ -436,17 +372,13 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                 }
                 case VIEW_TYPE_INFO: {
                     TextInfoPrivacyCell cell = (TextInfoPrivacyCell) holder.itemView;
-                    if (position == enableInfoRow) {
-                        cell.setText(getString(R.string.ZgInfo));
-                    } else if (position == linkInfoRow) {
-                        cell.setText(getString(R.string.ZgVlessLinkInfo));
+                    if (position == errorInfoRow) {
+                        String error = controller.isNativeAvailable() ? controller.getLastError() : controller.getNativeLoadError();
+                        cell.setText(LocaleController.formatString(R.string.ZgLastError, error));
                     } else if (position == fragmentInfoRow) {
                         cell.setText(getString(R.string.ZgFragmentSpecInfo));
                     } else if (position == portInfoRow) {
                         cell.setText(getString(R.string.ZgListenPortInfo));
-                    } else if (position == errorInfoRow) {
-                        String error = controller.isNativeAvailable() ? controller.getLastError() : controller.getNativeLoadError();
-                        cell.setText(LocaleController.formatString(R.string.ZgLastError, error));
                     } else if (position == refreshRateInfoRow) {
                         cell.setText(getString(R.string.ZgRefreshRateInfo));
                     } else if (position == batteryDefaultsInfoRow) {
@@ -457,23 +389,11 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
             }
         }
 
-        @SuppressWarnings("unchecked")
-        @Override
-        public void onBindViewHolder(RecyclerView.ViewHolder holder, int position, java.util.List payloads) {
-            if (holder.getItemViewType() == VIEW_TYPE_TEXT_CHECK && payloads.contains(PAYLOAD_CHECKED_CHANGED)) {
-                ((TextCheckCell) holder.itemView).setChecked(controller.isEnabled());
-            } else {
-                super.onBindViewHolder(holder, position, payloads);
-            }
-        }
-
         @Override
         public int getItemViewType(int position) {
-            if (position == enableRow) {
-                return VIEW_TYPE_TEXT_CHECK;
-            } else if (position == settingsHeaderRow || position == statusHeaderRow || position == batteryHeaderRow) {
+            if (position == statusHeaderRow || position == tunnelHeaderRow || position == batteryHeaderRow) {
                 return VIEW_TYPE_HEADER;
-            } else if (position == linkRow || position == fragmentRow || position == portRow || position == statusRow || position == routingRow || position == versionRow || position == statsRow || position == refreshRateRow) {
+            } else if (position == serverRow || position == statusRow || position == routingRow || position == versionRow || position == statsRow || position == fragmentRow || position == portRow || position == refreshRateRow) {
                 return VIEW_TYPE_TEXT_SETTING;
             } else if (position == statusShadowRow) {
                 return VIEW_TYPE_SHADOW;
@@ -486,7 +406,7 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
     public ArrayList<ThemeDescription> getThemeDescriptions() {
         ArrayList<ThemeDescription> themeDescriptions = new ArrayList<>();
 
-        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR, new Class[]{TextSettingsCell.class, TextCheckCell.class, HeaderCell.class}, null, null, null, Theme.key_windowBackgroundWhite));
+        themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_CELLBACKGROUNDCOLOR, new Class[]{TextSettingsCell.class, HeaderCell.class}, null, null, null, Theme.key_windowBackgroundWhite));
         themeDescriptions.add(new ThemeDescription(fragmentView, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_windowBackgroundGray));
 
         themeDescriptions.add(new ThemeDescription(actionBar, ThemeDescription.FLAG_BACKGROUND, null, null, null, null, Theme.key_actionBarDefault));
@@ -502,10 +422,6 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextSettingsCell.class}, new String[]{"valueTextView"}, null, null, null, Theme.key_windowBackgroundWhiteValueText));
 
         themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{HeaderCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlueHeader));
-
-        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteBlackText));
-        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrack));
-        themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextCheckCell.class}, new String[]{"checkBox"}, null, null, null, Theme.key_switchTrackChecked));
 
         themeDescriptions.add(new ThemeDescription(listView, ThemeDescription.FLAG_BACKGROUNDFILTER, new Class[]{TextInfoPrivacyCell.class}, null, null, null, Theme.key_windowBackgroundGrayShadow));
         themeDescriptions.add(new ThemeDescription(listView, 0, new Class[]{TextInfoPrivacyCell.class}, new String[]{"textView"}, null, null, null, Theme.key_windowBackgroundWhiteGrayText4));
