@@ -20,6 +20,14 @@ public class KeepAliveJob extends JobIntentService {
     private static volatile boolean startingJob;
     private static final Object sync = new Object();
 
+    /**
+     * ZG battery (F-04): upper bound for how long the job (and the wakelock behind it) waits
+     * for the TLRPC.Updates that follow an internal push. The latch is normally released within
+     * a few seconds by ConnectionsManager; this ceiling only matters when getDifference is slow,
+     * which is exactly when the notification still needs the CPU, so it is deliberately generous.
+     */
+    private static final long KEEP_ALIVE_TIMEOUT_MS = 60 * 1000;
+
     public static void startJob() {
         Utilities.globalQueue.postRunnable(() -> {
             if (startingJob || countDownLatch != null) {
@@ -68,12 +76,21 @@ public class KeepAliveJob extends JobIntentService {
             if (!startingJob) {
                 return;
             }
+            if (!ApplicationLoader.mainInterfacePaused) {
+                // ZG battery (F-04): the UI is in the foreground, so the update is processed and
+                // shown without any help from a wakelock - do not block a worker for it.
+                if (BuildVars.LOGS_ENABLED) {
+                    FileLog.d("skip keep-alive job, app is in foreground");
+                }
+                startingJob = false;
+                return;
+            }
             countDownLatch = new CountDownLatch(1);
         }
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("started keep-alive job");
         }
-        Utilities.globalQueue.postRunnable(finishJobByTimeoutRunnable, 60 * 1000);
+        Utilities.globalQueue.postRunnable(finishJobByTimeoutRunnable, KEEP_ALIVE_TIMEOUT_MS);
         try {
             countDownLatch.await();
         } catch (Throwable ignore) {
