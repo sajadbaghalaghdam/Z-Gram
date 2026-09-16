@@ -85,6 +85,25 @@ public class LiteMode {
     ); // 262143
     public static int PRESET_POWER_SAVER = 0;
 
+    // ZG battery (F-10): fork default for average/high devices. Deliberately a separate final
+    // constant - the server overwrites PRESET_LOW/MEDIUM/HIGH and the BATTERY_* thresholds via
+    // app config (updatePresets), so a fork default stored in one of those slots would be walked
+    // back remotely. Relative to PRESET_HIGH this drops: the animated sticker keyboard (a grid of
+    // simultaneously playing Lottie animations), animated reactions, animated chat background
+    // (the 60 Hz gradient loop), chat blur, chat scale, spoiler animation, call animations,
+    // video autoplay, particles and liquid glass. Every flag stays toggleable in Power Saving.
+    public static final int ZG_PRESET_BALANCED = (
+        FLAG_ANIMATED_STICKERS_CHAT |
+        FLAG_ANIMATED_EMOJI_CHAT |
+        FLAG_ANIMATED_EMOJI_KEYBOARD |
+        FLAG_CHAT_FORUM_TWOCOLUMN |
+        FLAG_CHAT_THANOS |
+        FLAG_AUTOPLAY_GIFS
+    );
+    // Power saving engages at 35% (50% on low-end devices) instead of the stock 10%.
+    private static final int ZG_BATTERY_DEFAULT = 35;
+    private static final int ZG_BATTERY_DEFAULT_LOW_PERF = 50;
+
     private static int BATTERY_LOW = 10;
     private static int BATTERY_MEDIUM = 10;
     private static int BATTERY_HIGH = 10;
@@ -200,13 +219,13 @@ public class LiteMode {
     }
 
     public static void loadPreference() {
-        int defaultValue = PRESET_HIGH, batteryDefaultValue = BATTERY_HIGH;
+        // ZG battery (F-10): fork defaults; the server-provided BATTERY_* thresholds are ignored
+        // on purpose so the 35% / 50% power-saving level sticks. Values only apply to installs
+        // that never touched the setting - a stored lite_mode6 / lite_mode_battery_level wins.
+        int defaultValue = ZG_PRESET_BALANCED, batteryDefaultValue = ZG_BATTERY_DEFAULT;
         if (SharedConfig.getDevicePerformanceClass() == SharedConfig.PERFORMANCE_CLASS_LOW) {
             defaultValue = PRESET_LOW;
-            batteryDefaultValue = BATTERY_LOW;
-        } else if (SharedConfig.getDevicePerformanceClass() == SharedConfig.PERFORMANCE_CLASS_AVERAGE) {
-            defaultValue = PRESET_MEDIUM;
-            batteryDefaultValue = BATTERY_MEDIUM;
+            batteryDefaultValue = ZG_BATTERY_DEFAULT_LOW_PERF;
         }
 
         final SharedPreferences preferences = MessagesController.getGlobalMainSettings();
