@@ -46,6 +46,7 @@ public:
     void addServerSalt(std::unique_ptr<TL_future_salt> &serverSalt, bool media);
     bool containsServerSalt(int64_t value, bool media);
     void suspendConnections(bool suspendPush);
+    void resetReconnectTimeouts();
     void getSessions(std::vector<int64_t> &sessions);
     void recreateSessions(HandshakeType type);
     void resetAddressAndPortNum();

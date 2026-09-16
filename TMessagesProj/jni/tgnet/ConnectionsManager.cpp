@@ -3816,6 +3816,7 @@ void ConnectionsManager::resumeNetwork(bool partial) {
         }
         if (!networkPaused) {
             for (auto & datacenter : datacenters) {
+                datacenter.second->resetReconnectTimeouts();
                 if (datacenter.second->isHandshaking(false)) {
                     datacenter.second->createGenericConnection()->connect();
                 } else if (datacenter.second->isHandshaking(true)) {
@@ -3844,6 +3845,7 @@ void ConnectionsManager::setNetworkAvailable(bool value, int32_t type, bool slow
             connectionState = ConnectionStateWaitingForNetwork;
         } else {
             for (auto & datacenter : datacenters) {
+                datacenter.second->resetReconnectTimeouts();
                 if (datacenter.second->isHandshaking(false)) {
                     datacenter.second->createGenericConnection()->connect();
                 } else if (datacenter.second->isHandshaking(true)) {

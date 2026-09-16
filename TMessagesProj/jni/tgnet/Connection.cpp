@@ -419,7 +419,19 @@ void Connection::setHasUsefullData() {
     if (!usefullData) {
         usefullDataReceiveTime = ConnectionsManager::getInstance(currentDatacenter->instanceNum).getCurrentTimeMonotonicMillis();
         usefullData = true;
-        lastReconnectTimeout = 50;
+        lastReconnectTimeout = 100;
+    }
+}
+
+void Connection::resetReconnectTimeout() {
+    // ZG battery (F-03): called when the network came back or the app resumed - both are fresh
+    // evidence that a connect attempt is worth making now, so drop any accumulated backoff and
+    // fire a pending reconnect timer right away instead of waiting it out.
+    lastReconnectTimeout = 100;
+    if (waitForReconnectTimer) {
+        reconnectTimer->stop();
+        waitForReconnectTimer = false;
+        connect();
     }
 }
 
@@ -702,11 +714,25 @@ void Connection::onDisconnectedInternal(int32_t reason, int32_t error) {
         }
         if (error == 0x68 || error == 0x71) {
             if (connectionType != ConnectionTypeProxy) {
+                // ZG battery (F-03): ECONNREFUSED / EHOSTUNREACH fail instantly, so the old 400 ms
+                // cap was a permanent 2.5 Hz SYN storm on captive portals / blocked networks.
+                // Exponential backoff with jitter: 100, 200, 400 ... capped at 5 s for the push
+                // connection (the standalone notification lifeline) and for everything while the
+                // app is in the foreground, 30 s for other connections while the app is paused.
+                // Any network-available / resume event resets it (see resetReconnectTimeout).
                 waitForReconnectTimer = true;
-                reconnectTimer->setTimeout(lastReconnectTimeout, false);
+                uint8_t jitter;
+                RAND_bytes(&jitter, 1);
+                reconnectTimer->setTimeout(lastReconnectTimeout + jitter * (lastReconnectTimeout / 1000 + 1), false);
                 lastReconnectTimeout *= 2;
-                if (lastReconnectTimeout > 400) {
-                    lastReconnectTimeout = 400;
+                uint32_t maxReconnectTimeout;
+                if (connectionType == ConnectionTypePush || ConnectionsManager::getInstance(currentDatacenter->instanceNum).lastPauseTime == 0) {
+                    maxReconnectTimeout = 5000;
+                } else {
+                    maxReconnectTimeout = 30000;
+                }
+                if (lastReconnectTimeout > maxReconnectTimeout) {
+                    lastReconnectTimeout = maxReconnectTimeout;
                 }
                 reconnectTimer->start();
             }

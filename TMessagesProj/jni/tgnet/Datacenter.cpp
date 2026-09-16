@@ -774,6 +774,31 @@ void Datacenter::suspendConnections(bool suspendPush) {
     }
 }
 
+void Datacenter::resetReconnectTimeouts() {
+    if (genericConnection != nullptr) {
+        genericConnection->resetReconnectTimeout();
+    }
+    if (pushConnection != nullptr) {
+        pushConnection->resetReconnectTimeout();
+    }
+    if (genericMediaConnection != nullptr) {
+        genericMediaConnection->resetReconnectTimeout();
+    }
+    if (tempConnection != nullptr) {
+        tempConnection->resetReconnectTimeout();
+    }
+    for (auto & a : uploadConnection) {
+        if (a != nullptr) {
+            a->resetReconnectTimeout();
+        }
+    }
+    for (auto & a : downloadConnection) {
+        if (a != nullptr) {
+            a->resetReconnectTimeout();
+        }
+    }
+}
+
 void Datacenter::getSessions(std::vector<int64_t> &sessions) {
     if (genericConnection != nullptr) {
         sessions.push_back(genericConnection->getSessionId());

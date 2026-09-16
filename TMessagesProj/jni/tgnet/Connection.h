@@ -35,6 +35,7 @@ public:
     void sendData(NativeByteBuffer *buffer, bool reportAck, bool encrypted);
     bool hasUsefullData();
     void setHasUsefullData();
+    void resetReconnectTimeout();
     bool allowsCustomPadding();
     uint32_t getConnectionToken();
     ConnectionType getConnectionType();
