@@ -25,6 +25,7 @@ import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.ImageLoader;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.ImageReceiver;
+import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessageObject.GroupedMessagePosition;
@@ -69,7 +70,10 @@ public class GroupMedia {
 
     public GroupMedia(@NonNull ChatMessageCell cell) {
         this.cell = cell;
-        this.spoilerEffect = SpoilerEffect2.getInstance(cell);
+        // ZG (G-06): this call site never consulted SpoilerEffect2.supports(), so gate it on the
+        // same Power Saving flag directly. The paid-media cover itself is server-side (the client
+        // only ever has the stripped thumbnail), so dropping the particle layer hides nothing less.
+        this.spoilerEffect = LiteMode.isEnabled(LiteMode.FLAG_CHAT_SPOILER) ? SpoilerEffect2.getInstance(cell) : null;
         this.animatedHidden = new AnimatedFloat(cell, 0, 350, CubicBezierInterpolator.EASE_OUT_QUINT);
         this.bounce = new ButtonBounce(cell);
     }
@@ -600,7 +604,7 @@ public class GroupMedia {
             h.radialProgress.draw(canvas);
             canvas.restore();
         }
-        if (hiddenAlpha > 0 && withSpoilers) {
+        if (hiddenAlpha > 0 && withSpoilers && spoilerEffect != null) {
             canvas.save();
             canvas.clipPath(clipPath2);
             canvas.translate(l, t);

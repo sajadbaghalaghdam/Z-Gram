@@ -19,6 +19,7 @@ import androidx.annotation.NonNull;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.Utilities;
@@ -44,7 +45,19 @@ public class SpoilerEffect2 {
     public final int type;
 
     public static boolean supports() {
-        return true;
+        // ZG (G-06): honour the Power Saving "animated spoiler effect" flag here too. Stock only
+        // ever asked whether the device supports the effect, so a user on a preset that clears
+        // FLAG_CHAT_SPOILER still paid for a SurfaceTexture, a dedicated EGL context and a GL
+        // render thread per spoilered message, each of which invalidates the parent view every
+        // frame for as long as the message is on screen. Every call site of supports() already
+        // treats false as "no particle layer" and detaches any instance it is holding.
+        //
+        // This does NOT reveal anything: the cover is the heavily stack-blurred bitmap drawn by
+        // ChatMessageCell.drawBlurredPhoto() / the blurImageReceiver in RichMessageLayout, which is
+        // painted before the particles and is unaffected. The flag has exactly the same meaning for
+        // text spoilers, where SpoilerEffect keeps drawing its static shader and only stops
+        // animating. Paid media is hidden server-side and never has the full media client-side.
+        return LiteMode.isEnabled(LiteMode.FLAG_CHAT_SPOILER);
     }
 
     private static HashMap<Integer, SpoilerEffect2> instance;
