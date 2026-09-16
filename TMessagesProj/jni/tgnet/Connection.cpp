@@ -289,7 +289,17 @@ void Connection::connect() {
     isMediaConnection = false;
     uint8_t strategy = ConnectionsManager::getInstance(currentDatacenter->instanceNum).getIpStratagy();
     uint32_t ipv6;
-    if (strategy == USE_IPV6_ONLY) {
+    if (!ConnectionsManager::getInstance(currentDatacenter->instanceNum).proxyAddress.empty()) {
+        // ZG: with a proxy in front of us the address family that matters is the one the PROXY
+        // can reach, not the one this phone has. Telegram picks IPv6 for roughly a third of its
+        // sockets whenever the local network offers it, and a proxy without IPv6 upstream - the
+        // common case, including the user's own VLESS server - cannot reach those DCs. Worse, a
+        // SOCKS5 CONNECT is answered before the far end is known to be reachable, so tgnet counts
+        // the socket as connected, sends its handshake into a black hole, times out and retries:
+        // the endless "Connected / Connecting" flapping. Every Telegram DC is reachable over
+        // IPv4, so pinning IPv4 while proxied costs nothing and removes the whole failure mode.
+        ipv6 = 0;
+    } else if (strategy == USE_IPV6_ONLY) {
         ipv6 = TcpAddressFlagIpv6;
     } else if (strategy == USE_IPV4_IPV6_RANDOM) {
         if (ConnectionsManager::getInstance(currentDatacenter->instanceNum).lastProtocolUsefullData) {
