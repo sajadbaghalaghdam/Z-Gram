@@ -3232,9 +3232,12 @@ public class NotificationsController extends BaseController implements Notificat
             intent.putExtra("currentAccount", currentAccount);
             PendingIntent pintent = PendingIntent.getService(ApplicationLoader.applicationContext, 0, intent, PendingIntent.FLAG_MUTABLE);
             SharedPreferences preferences = getAccountInstance().getNotificationsSettings();
-            int minutes = preferences.getInt("repeat_messages", 60);
+            // ZG battery (F-13): default "Never" (stock: hourly), and when enabled use a windowed,
+            // non-wakeup alarm the OS can batch instead of a full ELAPSED_REALTIME_WAKEUP. This is a
+            // re-alert of an already delivered notification, never the first delivery.
+            int minutes = preferences.getInt("repeat_messages", 0);
             if (minutes > 0 && personalCount > 0) {
-                alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + minutes * 60 * 1000, pintent);
+                alarmManager.setWindow(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + minutes * 60 * 1000L, 15 * 60 * 1000L, pintent);
             } else {
                 alarmManager.cancel(pintent);
             }
