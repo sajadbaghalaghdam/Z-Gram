@@ -12533,11 +12533,15 @@ public class MessagesController extends BaseController implements NotificationCe
         // at "finished" with chats missing, and nothing ever asks the server again - not even the
         // shortfall check at the end of processLoadedDialogs, because no page is ever requested.
         // Re-examine that verdict here, before the re-entrancy guard below is armed, so the
-        // resync's own loadDialogs is not swallowed by it. Only a list that claims to be finished
+        // repair's own loadDialogs is not swallowed by it. Only a list that claims to be finished
         // is reconsidered, so an account still paging normally is never disturbed.
-        if (getUserConfig().getDialogLoadOffsets(folderId)[UserConfig.i_dialogsLoadOffsetId] == Integer.MAX_VALUE
-                && checkDialogsResync(folderId, getUserConfig().getTotalDialogsCount(folderId))) {
-            return;
+        if (getUserConfig().getDialogLoadOffsets(folderId)[UserConfig.i_dialogsLoadOffsetId] == Integer.MAX_VALUE) {
+            if (checkDialogsRepair(folderId, getUserConfig().getTotalDialogsCount(folderId))) {
+                return;
+            }
+            if (folderId == 0) {
+                backfillKnownPeerDialogs();
+            }
         }
         loadingDialogs.put(folderId, true);
         getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
@@ -13401,44 +13405,177 @@ public class MessagesController extends BaseController implements NotificationCe
     // it actually handed us. messages.getDialogs is always sent with exclude_pinned = true, so the
     // pinned dialogs (up to 5, or 10 with Premium, plus the archive row) are counted but never
     // returned, and the server also counts dialogs it will not hand out at all.
-    private static final int DIALOGS_RESYNC_SLACK = 25;
+    private static final int DIALOGS_REPAIR_SLACK = 25;
+    // ZG: hard stop for the repair sweep, so a server that keeps handing back pages can never turn
+    // it into an endless request loop. 200 pages is 20000 dialogs, far past any real folder.
+    private static final int DIALOGS_REPAIR_MAX_PAGES = 200;
+    // ZG: peers per messages.getPeerDialogs request, and the pause between requests.
+    private static final int DIALOGS_BACKFILL_BATCH = 100;
+    private static final int DIALOGS_BACKFILL_DELAY = 1000;
+
+    private final SparseBooleanArray repairingDialogs = new SparseBooleanArray();
+    private final SparseIntArray repairDialogsPages = new SparseIntArray();
+    private boolean backfillingPeerDialogs;
 
     /**
-     * ZG: bounded self-heal for a dialog list that finished paging with pages missing.
+     * ZG: bounded self-heal for a dialog list that finished paging short of the folder's real size.
      *
      * Called once the folder's paging offset has reached Integer.MAX_VALUE, i.e. the client
-     * believes it has the whole list. messages.dialogsSlice tells us how many dialogs the folder
-     * really holds; if we pulled materially fewer than that, at least one page was skipped, so the
-     * paging offset is reset and the folder is walked once more from the top. Pages are idempotent
-     * (MessagesStorage.putDialogs REPLACEs rows and processLoadedDialogs merges into dialogs_dict),
-     * so a second pass only fills gaps.
+     * believes it has the whole list. messages.dialogsSlice.count is how many dialogs the folder
+     * really holds; if we pulled materially fewer, the offsets we hold were written by a sweep
+     * that skipped part of the folder, so they are thrown away and the folder is walked once more
+     * from the top with the current paging rule. Pages are idempotent (MessagesStorage.putDialogs
+     * REPLACEs rows and processLoadedDialogs merges into dialogs_dict), so the extra pass only
+     * fills gaps.
+     *
+     * The repair sweep drives itself to the end of the folder rather than stopping at the 400
+     * dialogs the normal first load stops at, because nothing else would finish it: past 400 the
+     * only driver is DialogsActivity.checkListLoad(), i.e. the user scrolling to the bottom of a
+     * list they cannot tell is incomplete.
      *
      * A persisted per-folder flag bounds this to at most one extra pass per account and folder; it
      * is cleared together with the other dialog offsets when the cache is cleared or the account is
      * reset (MessagesStorage.clearLoadingDialogsOffsets/reset).
      */
-    private boolean checkDialogsResync(int folderId, int loadedDialogsCount) {
+    private boolean checkDialogsRepair(int folderId, int loadedDialogsCount) {
         int serverDialogsCount = getUserConfig().getServerDialogsCount(folderId);
         if (serverDialogsCount <= 0 || loadedDialogsCount <= 0) {
             return false;
         }
-        if (serverDialogsCount - loadedDialogsCount <= DIALOGS_RESYNC_SLACK) {
+        if (serverDialogsCount - loadedDialogsCount <= DIALOGS_REPAIR_SLACK) {
             return false;
         }
-        if (getUserConfig().isDialogsResyncDone(folderId)) {
+        if (getUserConfig().isDialogsRepairDone(folderId)) {
             return false;
         }
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("dialogs folderId " + folderId + " finished with " + loadedDialogsCount + " of " + serverDialogsCount + " dialogs reported by the server, re-paging once");
         }
-        getUserConfig().setDialogsResyncDone(folderId, true);
+        getUserConfig().setDialogsRepairDone(folderId, true);
         getUserConfig().setDialogsLoadOffset(folderId, 0, 0, 0, 0, 0, 0);
         getUserConfig().setTotalDialogsCount(folderId, 0);
         getUserConfig().saveConfig(false);
         dialogsEndReached.put(folderId, false);
         serverDialogsEndReached.put(folderId, false);
+        repairingDialogs.put(folderId, true);
+        repairDialogsPages.put(folderId, 0);
         loadDialogs(folderId, 0, 100, false);
         return true;
+    }
+
+    /**
+     * ZG: ask for the dialogs of peers we know about but hold no dialog for.
+     *
+     * A complete messages.getDialogs sweep does not enumerate every dialog the folder holds - on
+     * the account this was traced on, a finished sweep returned 657 of the 1221 dialogs the server
+     * itself counted, and messages.getPeerDialogs then produced 106 real dialogs it had never
+     * returned, 7 of them with unread messages. Paging cannot recover those, because the server
+     * simply does not hand them back in the list. Asking for them by peer can, and it can only add
+     * dialogs: a peer with nothing to show comes back with top_message = 0 and is dropped here.
+     *
+     * Bounded by construction: the candidate set is our contacts plus the peers a chat folder
+     * names explicitly (both server-capped), it is walked in batches of 100 a second apart, it is
+     * attempted at most once per process, and a persisted flag stops it for good once it finishes.
+     */
+    private void backfillKnownPeerDialogs() {
+        if (backfillingPeerDialogs || getUserConfig().isPeerDialogsBackfilled() || !getUserConfig().isClientActivated()) {
+            return;
+        }
+        backfillingPeerDialogs = true;
+        getMessagesStorage().getPeersWithoutDialogs(peers -> {
+            peers.remove((Long) getUserConfig().getClientUserId());
+            if (BuildVars.LOGS_ENABLED) {
+                FileLog.d("dialogs backfill: " + peers.size() + " known peers hold no dialog");
+            }
+            if (peers.isEmpty()) {
+                getUserConfig().setPeerDialogsBackfilled(true);
+                getUserConfig().saveConfig(false);
+                return;
+            }
+            backfillPeerDialogsBatch(peers, 0);
+        });
+    }
+
+    private void backfillPeerDialogsBatch(ArrayList<Long> peers, int from) {
+        if (from >= peers.size()) {
+            getUserConfig().setPeerDialogsBackfilled(true);
+            getUserConfig().saveConfig(false);
+            if (BuildVars.LOGS_ENABLED) {
+                FileLog.d("dialogs backfill: done");
+            }
+            return;
+        }
+        final int to = Math.min(peers.size(), from + DIALOGS_BACKFILL_BATCH);
+        TLRPC.TL_messages_getPeerDialogs req = new TLRPC.TL_messages_getPeerDialogs();
+        for (int a = from; a < to; a++) {
+            TLRPC.InputPeer peer = getInputPeer(peers.get(a));
+            if (peer == null || peer instanceof TLRPC.TL_inputPeerEmpty) {
+                continue;
+            }
+            TLRPC.TL_inputDialogPeer inputDialogPeer = new TLRPC.TL_inputDialogPeer();
+            inputDialogPeer.peer = peer;
+            req.peers.add(inputDialogPeer);
+        }
+        if (req.peers.isEmpty()) {
+            backfillPeerDialogsBatch(peers, to);
+            return;
+        }
+        getConnectionsManager().sendRequest(req, (response, error) -> {
+            if (!(response instanceof TLRPC.TL_messages_peerDialogs)) {
+                // Leave the persisted flag unset so the next launch can try again; the in-process
+                // guard keeps this to one attempt per app start either way.
+                if (BuildVars.LOGS_ENABLED) {
+                    FileLog.d("dialogs backfill: batch " + from + " failed, " + (error != null ? error.text : "no response"));
+                }
+                return;
+            }
+            TLRPC.TL_messages_peerDialogs res = (TLRPC.TL_messages_peerDialogs) response;
+            LongSparseArray<TLRPC.Message> topMessages = new LongSparseArray<>();
+            for (int a = 0; a < res.messages.size(); a++) {
+                TLRPC.Message message = res.messages.get(a);
+                if (message == null || message.peer_id == null) {
+                    continue;
+                }
+                long did = MessageObject.getDialogId(message);
+                TLRPC.Message prev = topMessages.get(did);
+                if (prev == null || prev.id < message.id) {
+                    topMessages.put(did, message);
+                }
+            }
+            int added = 0;
+            for (int folder = 0; folder < 2; folder++) {
+                TLRPC.TL_messages_dialogs merge = new TLRPC.TL_messages_dialogs();
+                for (int a = 0; a < res.dialogs.size(); a++) {
+                    TLRPC.Dialog d = res.dialogs.get(a);
+                    if (d == null) {
+                        continue;
+                    }
+                    DialogObject.initDialog(d);
+                    // A peer with no dialog comes back as an empty one; adding it would put a
+                    // chat in the list that the server does not have.
+                    if (d.id == 0 || d.top_message == 0 || d.folder_id != folder) {
+                        continue;
+                    }
+                    TLRPC.Message message = topMessages.get(d.id);
+                    if (message == null || message.id != d.top_message) {
+                        continue;
+                    }
+                    merge.dialogs.add(d);
+                    merge.messages.add(message);
+                }
+                if (merge.dialogs.isEmpty()) {
+                    continue;
+                }
+                added += merge.dialogs.size();
+                merge.users.addAll(res.users);
+                merge.chats.addAll(res.chats);
+                processLoadedDialogs(merge, null, null, folder, 0, merge.dialogs.size(), DIALOGS_LOAD_TYPE_UNKNOWN, false, false, false);
+            }
+            if (BuildVars.LOGS_ENABLED) {
+                FileLog.d("dialogs backfill: asked " + req.peers.size() + " peers, recovered " + added + " dialogs");
+            }
+            AndroidUtilities.runOnUIThread(() -> backfillPeerDialogsBatch(peers, to), DIALOGS_BACKFILL_DELAY);
+        });
     }
 
     public void processLoadedDialogs(final TLRPC.messages_Dialogs dialogsRes, ArrayList<TLRPC.EncryptedChat> encChats, ArrayList<TLRPC.UserFull> fullUsers, int folderId, int offset, int count, int loadType, boolean resetEnd, boolean migrate, boolean fromCache) {
@@ -14018,10 +14155,23 @@ public class MessagesController extends BaseController implements NotificationCe
                 }
                 int totalDialogsLoadCount = getUserConfig().getTotalDialogsCount(folderId);
                 long[] dialogsLoadOffset2 = getUserConfig().getDialogLoadOffsets(folderId);
-                if (!fromCache && !migrate && totalDialogsLoadCount < 400 && dialogsLoadOffset2[UserConfig.i_dialogsLoadOffsetId] != -1 && dialogsLoadOffset2[UserConfig.i_dialogsLoadOffsetId] != Integer.MAX_VALUE) {
+                // ZG: a repair sweep keeps paging past the 400 the first load stops at - see
+                // checkDialogsRepair(); nothing but the user scrolling would ever finish it.
+                boolean repairing = repairingDialogs.get(folderId);
+                boolean repairHasPagesLeft = repairing && repairDialogsPages.get(folderId) < DIALOGS_REPAIR_MAX_PAGES;
+                boolean hasMorePages = dialogsLoadOffset2[UserConfig.i_dialogsLoadOffsetId] != -1 && dialogsLoadOffset2[UserConfig.i_dialogsLoadOffsetId] != Integer.MAX_VALUE;
+                if (!fromCache && !migrate && hasMorePages && (totalDialogsLoadCount < 400 || repairHasPagesLeft)) {
+                    if (repairing) {
+                        repairDialogsPages.put(folderId, repairDialogsPages.get(folderId) + 1);
+                    }
                     loadDialogs(folderId, 0, 100, false);
                 } else if (!fromCache && !migrate && loadType == 0 && serverDialogsEndFinal) {
-                    checkDialogsResync(folderId, totalDialogsLoadCount);
+                    if (repairing) {
+                        repairingDialogs.delete(folderId);
+                    }
+                    if (!checkDialogsRepair(folderId, totalDialogsLoadCount) && folderId == 0) {
+                        backfillKnownPeerDialogs();
+                    }
                 }
                 getNotificationCenter().postNotificationName(NotificationCenter.dialogsNeedReload);
 
