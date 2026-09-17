@@ -145,7 +145,7 @@ public class DrawingInBackgroundThreadDrawable implements NotificationCenter.Not
             bitmapCanvas.restore();
         }
 
-        if (!bitmapUpdating && !paused) {
+        if (!bitmapUpdating && !paused && hasFrameToRender()) {
             bitmapUpdating = true;
             prepareDraw(time);
             lastFrameId = frameGuid;
@@ -176,6 +176,20 @@ public class DrawingInBackgroundThreadDrawable implements NotificationCenter.Not
 
     public void prepareDraw(long time) {
 
+    }
+
+    // ZG perf: gate the perpetual re-render loop on real work. draw() re-posts bitmapCreateTask
+    // to the background thread every time it runs, with no check anywhere in this class for
+    // whether the content actually changed since the last pass - onFrameReady() below then
+    // unconditionally invalidates the parent, which schedules another draw() call, forever.
+    // Default true preserves that original always-rerender behaviour for every subclass that
+    // does not override it; AnimatedEmojiSpan's chunk overrides this to stop the loop once none
+    // of its holders are still animating; genuinely new content (scroll, attach, an emoji that
+    // starts playing) still reaches the screen because AnimatedEmojiHolder.invalidate() pings the
+    // parent view directly, independently of this loop, whenever a holder's drawable gets a new
+    // frame - so a false return here only skips a redundant re-render, never a real update.
+    public boolean hasFrameToRender() {
+        return true;
     }
 
     public void onFrameReady() {

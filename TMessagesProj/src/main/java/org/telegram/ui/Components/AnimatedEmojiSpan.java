@@ -912,6 +912,31 @@ public class AnimatedEmojiSpan extends ReplacementSpan {
 
                     private final ArrayList<AnimatedEmojiHolder> backgroundHolders = new ArrayList<>();
 
+                    // ZG perf: the base class re-renders on the background thread and invalidates
+                    // the parent every time draw() runs, with no check anywhere for whether any
+                    // holder actually produced a new frame - that made a chunk of 10+ inline emoji
+                    // (a common shape for DialogCell titles/previews and ChatMessageCell text) spin
+                    // forever once created, even with every emoji fully static (frozen by LiteMode,
+                    // or a genuinely non-animated custom emoji document). Only keep the loop alive
+                    // while something is actually decoding; a real change elsewhere (attach, scroll,
+                    // an emoji that starts playing) still reaches the screen via
+                    // AnimatedEmojiHolder.invalidate(), which pings the parent view directly and is
+                    // unrelated to this loop.
+                    @Override
+                    public boolean hasFrameToRender() {
+                        for (int i = 0; i < holders.size(); ++i) {
+                            AnimatedEmojiHolder holder = holders.get(i);
+                            if (holder == null || !holder.span.spanDrawn || holder.drawable == null) {
+                                continue;
+                            }
+                            ImageReceiver imageReceiver = holder.drawable.getImageReceiver();
+                            if (imageReceiver != null && (imageReceiver.isAnimationRunning() || imageReceiver.isLottieRunning())) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+
                     @Override
                     public void drawInBackground(Canvas canvas) {
                         for (int i = 0; i < backgroundHolders.size(); i++) {
