@@ -19,3 +19,6 @@ TMessagesProj/src/main/jniLibs/
 # ZG signing key material
 keystore.properties
 TMessagesProj/config/zg-release.keystore
+
+# ZG: the fork owner private Firebase config, not for publication
+TMessagesProj_AppStandalone/google-services.json
