@@ -13535,18 +13535,25 @@ public class MessagesController extends BaseController implements NotificationCe
                 arrayList.add(messageObject);
                 new_dialogMessage.put(did, arrayList);
             }
-            // ZG: the offset for the next page must be taken from the LAST dialog the server
-            // actually returned, in the server's own order. messages.getDialogs continues strictly
-            // after (offset_date, offset_id, offset_peer), and the list is ordered by
-            // (top message date desc, top message id desc), so the right offset is the returned
-            // dialog with the smallest (date, top_message) pair. This is what TDLib does:
-            // MessagesManager::on_get_dialogs() builds a DialogDate per returned dialog, where
-            // DialogDate::get_dialog_order() packs (date << 32 | message_id), and pages from the
-            // resulting last_server_dialog_date_ (td/telegram/MessagesManager.cpp, DialogDate.h).
-            // The old code picked the message with the smallest date over dialogsRes.messages,
-            // which (a) has no message-id tiebreak, so every other dialog sharing that date is
-            // skipped by the server on the next page and never requested again, and (b) can pick a
-            // message that is not the top message of any returned dialog.
+            // ZG: the offset for the next page is the LAST dialog the server returned, in the
+            // server's own order. messages.getDialogs continues strictly after
+            // (offset_date, offset_id, offset_peer), so the end of the page the server just
+            // produced is the only resume point that is certainly right.
+            //
+            // The previous rule took the returned dialog with the smallest (top message date,
+            // top message id), which is the same thing only as long as the folder is ordered by
+            // top-message date. It is not: a monoforum ("<channel> messages") dialog is placed by
+            // the activity of its channel while its own top_message can be months old. One such
+            // entry in the middle of a page dragged the cursor months down the list, and every
+            // dialog between the true end of the page and that position was skipped and never
+            // asked for again - on this account a single entry at index 65 of page 1 moved the
+            // cursor from "a minute ago" to six months back and cost 564 of 1221 dialogs.
+            //
+            // TDLib pages from the same (date, message id, dialog id) key
+            // (MessagesManager::on_get_dialogs, DialogDate.h), so it is exposed to the same
+            // entry; taking the server's own last dialog instead is strictly safer, because when
+            // the order does match top-message date the two are identical, and when it does not
+            // the array position is the server's answer and the date-based pick is a skip.
             TLRPC.Message offsetMessage = null;
             if (loadType == 0 && !fromCache && !migrate) {
                 LongSparseArray<TLRPC.Message> topMessages = new LongSparseArray<>();
@@ -13561,6 +13568,11 @@ public class MessagesController extends BaseController implements NotificationCe
                         topMessages.put(did, message);
                     }
                 }
+                // Dialogs the server hands back for another folder do not belong to this folder's
+                // order, so they are only used if the page holds nothing else (TDLib skips them
+                // outright, see the dialog_folder_id != folder_id branch of on_get_dialogs).
+                TLRPC.Message lastInFolder = null, oldestInFolder = null;
+                TLRPC.Message lastAnyFolder = null, oldestAnyFolder = null;
                 for (int a = 0; a < dialogsRes.dialogs.size(); a++) {
                     TLRPC.Dialog d = dialogsRes.dialogs.get(a);
                     if (d == null || d.top_message == 0) {
@@ -13574,12 +13586,37 @@ public class MessagesController extends BaseController implements NotificationCe
                     if (message == null || message.id != d.top_message) {
                         continue;
                     }
-                    // dialogsRes.dialogs arrives in the server's order, so on an exact (date, id)
-                    // tie the later entry is the one that sorts last.
-                    if (offsetMessage == null || message.date < offsetMessage.date
-                            || message.date == offsetMessage.date && message.id <= offsetMessage.id) {
-                        offsetMessage = message;
+                    lastAnyFolder = message;
+                    if (oldestAnyFolder == null || message.date < oldestAnyFolder.date
+                            || message.date == oldestAnyFolder.date && message.id <= oldestAnyFolder.id) {
+                        oldestAnyFolder = message;
                     }
+                    if (d.folder_id == folderId) {
+                        lastInFolder = message;
+                        if (oldestInFolder == null || message.date < oldestInFolder.date
+                                || message.date == oldestInFolder.date && message.id <= oldestInFolder.id) {
+                            oldestInFolder = message;
+                        }
+                    }
+                }
+                TLRPC.Message oldestMessage;
+                if (lastInFolder != null) {
+                    offsetMessage = lastInFolder;
+                    oldestMessage = oldestInFolder;
+                } else {
+                    offsetMessage = lastAnyFolder;
+                    oldestMessage = oldestAnyFolder;
+                }
+                // The cursor still has to move strictly backwards, or the end-of-list check below
+                // reads a page that did not advance as the end of the folder. When the server's
+                // own last dialog does not move it back - a page it re-served, or one whose tail
+                // we could not match to a message - fall back to the oldest dialog of the page,
+                // which always does.
+                int prevOffsetId = (int) dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetId];
+                int prevOffsetDate = (int) dialogsLoadOffset[UserConfig.i_dialogsLoadOffsetDate];
+                if (offsetMessage != null && prevOffsetId != 0 && prevOffsetId != Integer.MAX_VALUE
+                        && !(offsetMessage.date != prevOffsetDate ? offsetMessage.date < prevOffsetDate : offsetMessage.id < prevOffsetId)) {
+                    offsetMessage = oldestMessage;
                 }
             }
             // ZG: legacy fallback for accounts that never stored valid dialog load offsets
