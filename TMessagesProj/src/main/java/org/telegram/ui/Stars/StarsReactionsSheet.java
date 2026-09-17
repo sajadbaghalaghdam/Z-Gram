@@ -1608,7 +1608,12 @@ public class StarsReactionsSheet extends BottomSheet implements NotificationCent
             }
 
             final long now = System.currentTimeMillis();
-            final float deltaTime = Math.min(lastTime - now, 16) / 1000f * speed;
+            // ZG fix: this was "lastTime - now", which is negative on every call after the first
+            // (now only ever grows), so particles moved backwards at the wrong, ever-changing
+            // magnitude instead of forward at a clamped 16ms step. now - lastTime is the intended
+            // elapsed time since the previous process(); Math.min(..., 16) still caps a long gap
+            // (e.g. the very first call, when lastTime is 0) to one frame's worth of motion.
+            final float deltaTime = Math.min(now - lastTime, 16) / 1000f * speed;
             for (int i = 0; i < Math.min(visibleCount, particles.size()); ++i) {
                 final Particle p = particles.get(i);
                 float lifetime = p.lifetime <= 0 ? 2f : (now - p.start) / (float) p.lifetime;
@@ -1622,7 +1627,11 @@ public class StarsReactionsSheet extends BottomSheet implements NotificationCent
             }
             lastTime = now;
 
-            if (lastInvalidateTime == 0 || lastInvalidateTime - now >= 66) {
+            // ZG fix: same inverted-subtraction bug - "lastInvalidateTime - now" can never reach
+            // +66 once lastInvalidateTime is set (now only grows), so this throttle fired exactly
+            // once and then permanently returned false. Every caller that guards its own invalidate
+            // on this return value (e.g. ReactionsLayoutInBubble) effectively froze after one frame.
+            if (lastInvalidateTime == 0 || now - lastInvalidateTime >= 66) {
                 lastInvalidateTime = now;
                 return true;
             }
