@@ -552,13 +552,25 @@ public class UserConfig extends BaseController {
     }
 
     // ZG: set once a folder's dialog list has been re-paged from the top to recover such a gap, so
-    // that the recovery runs at most once per account and folder.
-    public boolean isDialogsResyncDone(int folderId) {
-        return getPreferences().getBoolean("2dialogsResyncDone" + (folderId == 0 ? "" : folderId), false);
+    // that the recovery runs at most once per account and folder. The key carries a generation
+    // number: accounts latched short by an older, broken paging rule have never run the current
+    // repair, so bumping it re-arms them exactly once.
+    public boolean isDialogsRepairDone(int folderId) {
+        return getPreferences().getBoolean("3dialogsRepairDone" + (folderId == 0 ? "" : folderId), false);
     }
 
-    public void setDialogsResyncDone(int folderId, boolean done) {
-        getPreferences().edit().putBoolean("2dialogsResyncDone" + (folderId == 0 ? "" : folderId), done).commit();
+    public void setDialogsRepairDone(int folderId, boolean done) {
+        getPreferences().edit().putBoolean("3dialogsRepairDone" + (folderId == 0 ? "" : folderId), done).commit();
+    }
+
+    // ZG: set once the dialogs of the peers we know about but hold no dialog for have been asked
+    // for with messages.getPeerDialogs, so that backfill runs at most once per account.
+    public boolean isPeerDialogsBackfilled() {
+        return getPreferences().getBoolean("3peerDialogsBackfilled", false);
+    }
+
+    public void setPeerDialogsBackfilled(boolean done) {
+        getPreferences().edit().putBoolean("3peerDialogsBackfilled", done).commit();
     }
 
     public long[] getDialogLoadOffsets(int folderId) {

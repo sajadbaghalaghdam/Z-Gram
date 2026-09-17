@@ -434,8 +434,9 @@ public class MessagesStorage extends BaseController {
             getUserConfig().setDialogsLoadOffset(a, 0, 0, 0, 0, 0, 0);
             getUserConfig().setTotalDialogsCount(a, 0);
             getUserConfig().setServerDialogsCount(a, 0);
-            getUserConfig().setDialogsResyncDone(a, false);
+            getUserConfig().setDialogsRepairDone(a, false);
         }
+        getUserConfig().setPeerDialogsBackfilled(false);
         getUserConfig().saveConfig(false);
     }
 
@@ -2246,8 +2247,9 @@ public class MessagesStorage extends BaseController {
                 getUserConfig().setDialogsLoadOffset(a, 0, 0, 0, 0, 0, 0);
                 getUserConfig().setTotalDialogsCount(a, 0);
                 getUserConfig().setServerDialogsCount(a, 0);
-                getUserConfig().setDialogsResyncDone(a, false);
+                getUserConfig().setDialogsRepairDone(a, false);
             }
+            getUserConfig().setPeerDialogsBackfilled(false);
             getUserConfig().clearFilters();
             getUserConfig().clearPinnedDialogsLoaded();
 
@@ -13639,6 +13641,50 @@ public class MessagesStorage extends BaseController {
             }
         }
         return deletedMessages;
+    }
+
+    /**
+     * ZG: peers we know about locally but hold no dialog row for - our contacts and the peers a
+     * chat folder names explicitly. A finished messages.getDialogs sweep does not enumerate every
+     * dialog the folder holds, so these are asked for directly with messages.getPeerDialogs; see
+     * MessagesController.backfillKnownPeerDialogs().
+     *
+     * Both sets are bounded by the server (contacts and a folder's include_peers are capped), so
+     * the result cannot grow without limit.
+     */
+    public void getPeersWithoutDialogs(Utilities.Callback<ArrayList<Long>> callback) {
+        storageQueue.postRunnable(() -> {
+            ArrayList<Long> result = new ArrayList<>();
+            HashSet<Long> seen = new HashSet<>();
+            SQLiteCursor cursor = null;
+            try {
+                cursor = database.queryFinalized("SELECT uid FROM contacts WHERE uid NOT IN (SELECT did FROM dialogs)");
+                while (cursor.next()) {
+                    long uid = cursor.longValue(0);
+                    if (uid != 0 && seen.add(uid)) {
+                        result.add(uid);
+                    }
+                }
+                cursor.dispose();
+                cursor = null;
+                cursor = database.queryFinalized("SELECT DISTINCT peer FROM dialog_filter_ep WHERE peer NOT IN (SELECT did FROM dialogs)");
+                while (cursor.next()) {
+                    long peer = cursor.longValue(0);
+                    if (peer != 0 && seen.add(peer)) {
+                        result.add(peer);
+                    }
+                }
+                cursor.dispose();
+                cursor = null;
+            } catch (Exception e) {
+                FileLog.e(e);
+            } finally {
+                if (cursor != null) {
+                    cursor.dispose();
+                }
+            }
+            AndroidUtilities.runOnUIThread(() -> callback.run(result));
+        });
     }
 
     public void getEphemeralMessages(long dialogId, long topicId, Utilities.Callback<ArrayList<TL_ephemeral.EphemeralMessage>> callback) {
