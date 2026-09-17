@@ -1228,7 +1228,16 @@ public class AnimatedEmojiDrawable extends Drawable {
             bounds.set(getBounds());
             bounds.offset(offsetX, offsetY);
             final float particlesAlpha = this.particlesAlpha.set(hasParticles);
-            if (particlesAlpha > 0) {
+            // ZG perf: hasParticles stays true for as long as a collectible/gift emoji status is
+            // shown (there is no natural point where it goes back to false), so this branch used to
+            // arm a 15fps Choreographer60FpsContent loop unconditionally and never let it go - once
+            // any status badge with particles was drawn once, it kept invalidating its host view
+            // forever, including with FLAG_PARTICLES off (this fork's default: see LiteMode.java,
+            // ZG_PRESET_BALANCED), where Particles.process() below was already silently bailing out
+            // and leaving the sparkle frozen. Gate on the same flag the Power Saving screen already
+            // exposes ("Particles") so a disabled/frozen effect actually stops ticking instead of
+            // spinning to no visible effect.
+            if (particlesAlpha > 0 && LiteMode.isEnabled(LiteMode.FLAG_PARTICLES)) {
                 particles.setBounds(bounds);
                 particles.process();
                 particles.draw(canvas, Theme.multAlpha(lastColor == null ? 0xFFFFFFFF : lastColor, particlesAlpha));
