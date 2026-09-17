@@ -24,7 +24,6 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
-import org.telegram.messenger.SharedConfig;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
@@ -60,12 +59,6 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
     private int fragmentInfoRow;
     private int portRow;
     private int portInfoRow;
-    private int batteryHeaderRow;
-    private int refreshRateRow;
-    private int refreshRateInfoRow;
-    private int performanceClassRow;
-    private int performanceClassInfoRow;
-    private int batteryDefaultsInfoRow;
 
     private final ZgProxyController controller = ZgProxyController.getInstance();
 
@@ -142,10 +135,6 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                 editFragmentSpec();
             } else if (position == portRow) {
                 editPort();
-            } else if (position == refreshRateRow) {
-                chooseRefreshRate();
-            } else if (position == performanceClassRow) {
-                choosePerformanceClass();
             }
         });
 
@@ -204,65 +193,6 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         });
     }
 
-    private void chooseRefreshRate() {
-        if (getParentActivity() == null) {
-            return;
-        }
-        String[] options = new String[]{getString(R.string.ZgRefreshRateAdaptive), getString(R.string.ZgRefreshRateMax)};
-        showDialog(AlertsCreator.createSingleChoiceDialog(getParentActivity(), options, getString(R.string.ZgRefreshRate), SharedConfig.zgRefreshRateMode, (dialog, which) -> {
-            SharedConfig.setZgRefreshRateMode(which == 1 ? SharedConfig.ZG_REFRESH_RATE_MAX : SharedConfig.ZG_REFRESH_RATE_ADAPTIVE);
-            if (getParentActivity() != null) {
-                if (SharedConfig.zgRefreshRateMode == SharedConfig.ZG_REFRESH_RATE_MAX) {
-                    AndroidUtilities.setPreferredMaxRefreshRate(getParentActivity().getWindow());
-                } else {
-                    AndroidUtilities.clearPreferredRefreshRate(getParentActivity().getWindow());
-                }
-            }
-            if (listAdapter != null) {
-                listAdapter.notifyItemChanged(refreshRateRow);
-            }
-        }));
-    }
-
-    // ZG battery (round two, section 5): one switch that makes the whole interface behave as if it
-    // were running on a slower phone. The device class gates chat blur, the parallel media decode
-    // pool and a long tail of effect-quality decisions, so forcing it down is a single calm-mode
-    // control the user can reach without picking every Power Saving flag by hand.
-    private void choosePerformanceClass() {
-        if (getParentActivity() == null) {
-            return;
-        }
-        String[] options = new String[]{
-                getString(R.string.ZgPerformanceClassAuto),
-                getString(R.string.ZgPerformanceClassLow),
-                getString(R.string.ZgPerformanceClassAverage),
-                getString(R.string.ZgPerformanceClassHigh)
-        };
-        int selected = SharedConfig.getOverrideDevicePerformanceClass() + 1;
-        if (selected < 0 || selected >= options.length) {
-            selected = 0;
-        }
-        showDialog(AlertsCreator.createSingleChoiceDialog(getParentActivity(), options, getString(R.string.ZgPerformanceClass), selected, (dialog, which) -> {
-            SharedConfig.overrideDevicePerformanceClass(which - 1);
-            if (listAdapter != null) {
-                listAdapter.notifyItemChanged(performanceClassRow);
-            }
-        }));
-    }
-
-    private String performanceClassText() {
-        switch (SharedConfig.getOverrideDevicePerformanceClass()) {
-            case SharedConfig.PERFORMANCE_CLASS_LOW:
-                return getString(R.string.ZgPerformanceClassLow);
-            case SharedConfig.PERFORMANCE_CLASS_AVERAGE:
-                return getString(R.string.ZgPerformanceClassAverage);
-            case SharedConfig.PERFORMANCE_CLASS_HIGH:
-                return getString(R.string.ZgPerformanceClassHigh);
-            default:
-                return getString(R.string.ZgPerformanceClassAuto);
-        }
-    }
-
     private void updateRows() {
         rowCount = 0;
         statusHeaderRow = rowCount++;
@@ -283,12 +213,6 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         fragmentInfoRow = rowCount++;
         portRow = rowCount++;
         portInfoRow = rowCount++;
-        batteryHeaderRow = rowCount++;
-        refreshRateRow = rowCount++;
-        refreshRateInfoRow = rowCount++;
-        performanceClassRow = rowCount++;
-        performanceClassInfoRow = rowCount++;
-        batteryDefaultsInfoRow = rowCount++;
         if (listAdapter != null) {
             listAdapter.notifyDataSetChanged();
         }
@@ -350,7 +274,7 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
             int position = holder.getAdapterPosition();
-            return position == fragmentRow || position == portRow || position == refreshRateRow || position == performanceClassRow;
+            return position == fragmentRow || position == portRow;
         }
 
         @Override
@@ -386,8 +310,6 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                         cell.setText(getString(R.string.ZgStatus));
                     } else if (position == tunnelHeaderRow) {
                         cell.setText(getString(R.string.ZgTunnel));
-                    } else if (position == batteryHeaderRow) {
-                        cell.setText(getString(R.string.ZgBattery));
                     }
                     break;
                 }
@@ -410,10 +332,6 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                     } else if (position == portRow) {
                         int port = controller.getListenPort();
                         cell.setTextAndValue(getString(R.string.ZgListenPort), port > 0 ? String.valueOf(port) : getString(R.string.ZgListenPortAuto), false);
-                    } else if (position == refreshRateRow) {
-                        cell.setTextAndValue(getString(R.string.ZgRefreshRate), getString(SharedConfig.zgRefreshRateMode == SharedConfig.ZG_REFRESH_RATE_MAX ? R.string.ZgRefreshRateMax : R.string.ZgRefreshRateAdaptive), false);
-                    } else if (position == performanceClassRow) {
-                        cell.setTextAndValue(getString(R.string.ZgPerformanceClass), performanceClassText(), false);
                     }
                     break;
                 }
@@ -426,12 +344,6 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
                         cell.setText(getString(R.string.ZgFragmentSpecInfo));
                     } else if (position == portInfoRow) {
                         cell.setText(getString(R.string.ZgListenPortInfo));
-                    } else if (position == refreshRateInfoRow) {
-                        cell.setText(getString(R.string.ZgRefreshRateInfo));
-                    } else if (position == performanceClassInfoRow) {
-                        cell.setText(getString(R.string.ZgPerformanceClassInfo));
-                    } else if (position == batteryDefaultsInfoRow) {
-                        cell.setText(getString(R.string.ZgBatteryDefaultsInfo));
                     }
                     break;
                 }
@@ -440,9 +352,9 @@ public class ZgSettingsActivity extends BaseFragment implements NotificationCent
 
         @Override
         public int getItemViewType(int position) {
-            if (position == statusHeaderRow || position == tunnelHeaderRow || position == batteryHeaderRow) {
+            if (position == statusHeaderRow || position == tunnelHeaderRow) {
                 return VIEW_TYPE_HEADER;
-            } else if (position == serverRow || position == statusRow || position == routingRow || position == versionRow || position == statsRow || position == fragmentRow || position == portRow || position == refreshRateRow || position == performanceClassRow) {
+            } else if (position == serverRow || position == statusRow || position == routingRow || position == versionRow || position == statsRow || position == fragmentRow || position == portRow) {
                 return VIEW_TYPE_TEXT_SETTING;
             } else if (position == statusShadowRow) {
                 return VIEW_TYPE_SHADOW;

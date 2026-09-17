@@ -53,6 +53,8 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
+import org.telegram.ui.Cells.TextSettingsCell;
+import org.telegram.ui.Components.AlertsCreator;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
 import org.telegram.ui.Components.AnimatedTextView;
 import org.telegram.ui.Components.BatteryDrawable;
@@ -147,6 +149,12 @@ public class LiteModeSettingsActivity extends BaseFragment {
                     SharedConfig.setAnimationsEnabled(!animations);
                     editor.commit();
                     ((TextCell) view).setChecked(!animations);
+                }
+            } else if (item.viewType == VIEW_TYPE_SETTINGS) {
+                if (item.type == SETTINGS_TYPE_REFRESH_RATE) {
+                    chooseRefreshRate();
+                } else if (item.type == SETTINGS_TYPE_PERFORMANCE_CLASS) {
+                    choosePerformanceClass();
                 }
             }
         });
@@ -281,7 +289,69 @@ public class LiteModeSettingsActivity extends BaseFragment {
         items.add(Item.asSwitch(LocaleController.getString(R.string.LiteSmoothTransitions), SWITCH_TYPE_SMOOTH_TRANSITIONS));
         items.add(Item.asInfo(LocaleController.getString("LiteSmoothTransitionsInfo")));
 
+        items.add(Item.asHeader(LocaleController.getString(R.string.ZgBattery)));
+        items.add(Item.asSettings(LocaleController.getString(R.string.ZgRefreshRate), LocaleController.getString(SharedConfig.zgRefreshRateMode == SharedConfig.ZG_REFRESH_RATE_MAX ? R.string.ZgRefreshRateMax : R.string.ZgRefreshRateAdaptive), SETTINGS_TYPE_REFRESH_RATE));
+        items.add(Item.asInfo(LocaleController.getString(R.string.ZgRefreshRateInfo)));
+        items.add(Item.asSettings(LocaleController.getString(R.string.ZgPerformanceClass), performanceClassText(), SETTINGS_TYPE_PERFORMANCE_CLASS));
+        items.add(Item.asInfo(LocaleController.getString(R.string.ZgPerformanceClassInfo)));
+        items.add(Item.asInfo(LocaleController.getString(R.string.ZgBatteryDefaultsInfo)));
+
         adapter.setItems(oldItems, items);
+    }
+
+    private String performanceClassText() {
+        switch (SharedConfig.getOverrideDevicePerformanceClass()) {
+            case SharedConfig.PERFORMANCE_CLASS_LOW:
+                return LocaleController.getString(R.string.ZgPerformanceClassLow);
+            case SharedConfig.PERFORMANCE_CLASS_AVERAGE:
+                return LocaleController.getString(R.string.ZgPerformanceClassAverage);
+            case SharedConfig.PERFORMANCE_CLASS_HIGH:
+                return LocaleController.getString(R.string.ZgPerformanceClassHigh);
+            default:
+                return LocaleController.getString(R.string.ZgPerformanceClassAuto);
+        }
+    }
+
+    private void chooseRefreshRate() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        String[] options = new String[]{LocaleController.getString(R.string.ZgRefreshRateAdaptive), LocaleController.getString(R.string.ZgRefreshRateMax)};
+        showDialog(AlertsCreator.createSingleChoiceDialog(getParentActivity(), options, LocaleController.getString(R.string.ZgRefreshRate), SharedConfig.zgRefreshRateMode, (dialog, which) -> {
+            SharedConfig.setZgRefreshRateMode(which == 1 ? SharedConfig.ZG_REFRESH_RATE_MAX : SharedConfig.ZG_REFRESH_RATE_ADAPTIVE);
+            if (getParentActivity() != null) {
+                if (SharedConfig.zgRefreshRateMode == SharedConfig.ZG_REFRESH_RATE_MAX) {
+                    AndroidUtilities.setPreferredMaxRefreshRate(getParentActivity().getWindow());
+                } else {
+                    AndroidUtilities.clearPreferredRefreshRate(getParentActivity().getWindow());
+                }
+            }
+            updateItems();
+        }));
+    }
+
+    // ZG battery (round two, section 5): one switch that makes the whole interface behave as if it
+    // were running on a slower phone. The device class gates chat blur, the parallel media decode
+    // pool and a long tail of effect-quality decisions, so forcing it down is a single calm-mode
+    // control the user can reach without picking every Power Saving flag by hand.
+    private void choosePerformanceClass() {
+        if (getParentActivity() == null) {
+            return;
+        }
+        String[] options = new String[]{
+                LocaleController.getString(R.string.ZgPerformanceClassAuto),
+                LocaleController.getString(R.string.ZgPerformanceClassLow),
+                LocaleController.getString(R.string.ZgPerformanceClassAverage),
+                LocaleController.getString(R.string.ZgPerformanceClassHigh)
+        };
+        int selected = SharedConfig.getOverrideDevicePerformanceClass() + 1;
+        if (selected < 0 || selected >= options.length) {
+            selected = 0;
+        }
+        showDialog(AlertsCreator.createSingleChoiceDialog(getParentActivity(), options, LocaleController.getString(R.string.ZgPerformanceClass), selected, (dialog, which) -> {
+            SharedConfig.overrideDevicePerformanceClass(which - 1);
+            updateItems();
+        }));
     }
 
     private void updateInfo() {
@@ -336,8 +406,14 @@ public class LiteModeSettingsActivity extends BaseFragment {
     private static final int VIEW_TYPE_SWITCH = 3;
     private static final int VIEW_TYPE_CHECKBOX = 4;
     private static final int VIEW_TYPE_SWITCH2 = 5;
+    private static final int VIEW_TYPE_SETTINGS = 6;
 
     public static final int SWITCH_TYPE_SMOOTH_TRANSITIONS = 1;
+
+    // Distinct from SWITCH_TYPE_SMOOTH_TRANSITIONS: scrollToType(int) below matches on Item.type
+    // alone, regardless of viewType, so these must not collide with it or with each other.
+    public static final int SETTINGS_TYPE_REFRESH_RATE = 2;
+    public static final int SETTINGS_TYPE_PERFORMANCE_CLASS = 3;
 
     private class Adapter extends AdapterWithDiffUtils {
 
@@ -372,6 +448,8 @@ public class LiteModeSettingsActivity extends BaseFragment {
                 view = new SwitchCell(context);
             } else if (viewType == VIEW_TYPE_SWITCH2) {
                 view = new TextCell(context, 23, false, true, null);
+            } else if (viewType == VIEW_TYPE_SETTINGS) {
+                view = new TextSettingsCell(context);
             }
             return new RecyclerListView.Holder(view);
         }
@@ -412,6 +490,10 @@ public class LiteModeSettingsActivity extends BaseFragment {
                     boolean animations = preferences.getBoolean("view_animations", true);
                     textCell.setTextAndCheck(item.text, animations, false);
                 }
+            } else if (viewType == VIEW_TYPE_SETTINGS) {
+                TextSettingsCell settingsCell = (TextSettingsCell) holder.itemView;
+                final boolean divider = position + 1 < items.size() && items.get(position + 1).viewType != VIEW_TYPE_INFO;
+                settingsCell.setTextAndValue(item.text, item.value, divider);
             }
         }
 
@@ -430,7 +512,7 @@ public class LiteModeSettingsActivity extends BaseFragment {
 
         @Override
         public boolean isEnabled(RecyclerView.ViewHolder holder) {
-            return holder.getItemViewType() == VIEW_TYPE_CHECKBOX || holder.getItemViewType() == VIEW_TYPE_SWITCH || holder.getItemViewType() == VIEW_TYPE_SWITCH2;
+            return holder.getItemViewType() == VIEW_TYPE_CHECKBOX || holder.getItemViewType() == VIEW_TYPE_SWITCH || holder.getItemViewType() == VIEW_TYPE_SWITCH2 || holder.getItemViewType() == VIEW_TYPE_SETTINGS;
         }
     }
 
@@ -984,6 +1066,7 @@ public class LiteModeSettingsActivity extends BaseFragment {
 
     private static class Item extends AdapterWithDiffUtils.Item {
         public CharSequence text;
+        public CharSequence value;
         public int iconResId;
         public int flags;
         public int type;
@@ -1014,6 +1097,11 @@ public class LiteModeSettingsActivity extends BaseFragment {
         public static Item asSwitch(CharSequence text, int type) {
             return new Item(VIEW_TYPE_SWITCH2, text, 0, 0, type);
         }
+        public static Item asSettings(CharSequence text, CharSequence value, int type) {
+            Item item = new Item(VIEW_TYPE_SETTINGS, text, 0, 0, type);
+            item.value = value;
+            return item;
+        }
 
         public int getFlagsCount() {
             return Integer.bitCount(flags);
@@ -1036,7 +1124,7 @@ public class LiteModeSettingsActivity extends BaseFragment {
                     return false;
                 }
             }
-            if (viewType == VIEW_TYPE_SWITCH2) {
+            if (viewType == VIEW_TYPE_SWITCH2 || viewType == VIEW_TYPE_SETTINGS) {
                 if (item.type != type) {
                     return false;
                 }
@@ -1046,7 +1134,7 @@ public class LiteModeSettingsActivity extends BaseFragment {
                     return false;
                 }
             }
-            if (viewType == VIEW_TYPE_HEADER || viewType == VIEW_TYPE_INFO || viewType == VIEW_TYPE_SWITCH || viewType == VIEW_TYPE_CHECKBOX || viewType == VIEW_TYPE_SWITCH2) {
+            if (viewType == VIEW_TYPE_HEADER || viewType == VIEW_TYPE_INFO || viewType == VIEW_TYPE_SWITCH || viewType == VIEW_TYPE_CHECKBOX || viewType == VIEW_TYPE_SWITCH2 || viewType == VIEW_TYPE_SETTINGS) {
                 if (!TextUtils.equals(item.text, text)) {
                     return false;
                 }
