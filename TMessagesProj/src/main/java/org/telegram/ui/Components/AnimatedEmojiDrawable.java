@@ -537,11 +537,15 @@ public class AnimatedEmojiDrawable extends Drawable {
         return this.document != null ? this.document.id : this.documentId;
     }
 
-    private static boolean liteModeKeyboard, liteModeReactions;
+    private static boolean liteModeKeyboard, liteModeReactions, liteModeChat;
 
     private static void updateLiteModeValues() {
         liteModeKeyboard = LiteMode.isEnabled(LiteMode.FLAG_ANIMATED_EMOJI_KEYBOARD);
         liteModeReactions = LiteMode.isEnabled(LiteMode.FLAG_ANIMATED_EMOJI_REACTIONS);
+        // ZG perf: "Autoplay in chat" (Power Saving > Animated Emoji > Chat) - see initDocument(),
+        // onlyStaticPreview. Cached the same way as the two flags above so isEnabled() (a battery
+        // level check plus an int AND) does not run on every initDocument() call.
+        liteModeChat = LiteMode.isEnabled(LiteMode.FLAG_ANIMATED_EMOJI_CHAT);
     }
 
     public TLRPC.Document getDocument() {
@@ -598,7 +602,17 @@ public class AnimatedEmojiDrawable extends Drawable {
             imageReceiver.setUniqKeyPrefix(cacheType + "_");
         }
         imageReceiver.setVideoThumbIsSame(true);
-        boolean onlyStaticPreview = SharedConfig.getDevicePerformanceClass() == SharedConfig.PERFORMANCE_CLASS_LOW && cacheType == CACHE_TYPE_ALERT_PREVIEW_TAB_STRIP || (cacheType == CACHE_TYPE_KEYBOARD || cacheType == CACHE_TYPE_TOGGLEABLE_EDIT) && !liteModeKeyboard || cacheType == CACHE_TYPE_ALERT_PREVIEW && !liteModeReactions;
+        // ZG perf: CACHE_TYPE_MESSAGES is what DialogCell (title/preview/draft) and
+        // ChatMessageCell (message text, captions, poll/button text) both use for inline custom
+        // emoji - see AnimatedEmojiSpan.update() call sites. It used to hit none of the branches
+        // above, so "Autoplay in chat" (FLAG_ANIMATED_EMOJI_CHAT, the user-facing "Animated Emoji"
+        // sub-toggle actually labelled "Autoplay in chat") never reached it: those emoji kept
+        // decoding Lottie/WEBM frames continuously regardless of the setting, in both the dialog
+        // list and inside a chat. Gated the same way KEYBOARD/REACTIONS already are on this line -
+        // when off, initDocument() below loads the document's own static thumbnail (WEBM) or first
+        // decoded frame (Lottie, "_firstframe"), never a blank placeholder, so the correct emoji
+        // still renders, just without the continuous decode/invalidate loop.
+        boolean onlyStaticPreview = SharedConfig.getDevicePerformanceClass() == SharedConfig.PERFORMANCE_CLASS_LOW && cacheType == CACHE_TYPE_ALERT_PREVIEW_TAB_STRIP || (cacheType == CACHE_TYPE_KEYBOARD || cacheType == CACHE_TYPE_TOGGLEABLE_EDIT) && !liteModeKeyboard || cacheType == CACHE_TYPE_ALERT_PREVIEW && !liteModeReactions || cacheType == CACHE_TYPE_MESSAGES && !liteModeChat;
         if (cacheType == CACHE_TYPE_ALERT_PREVIEW_STATIC || cacheType == CACHE_TYPE_ALERT_PREVIEW_STATIC_WITH_THUMB) {
             onlyStaticPreview = true;
         }
