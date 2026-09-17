@@ -359,7 +359,20 @@ public class LiteMode {
     }
 
     private static void onFlagsUpdate(int oldValue, int newValue) {
-        int changedFlags = ~oldValue & newValue;
+        // ZG fix: was `~oldValue & newValue`, which is non-zero only for bits turning ON.
+        // Power Saving engaging drives newValue to PRESET_POWER_SAVER (0), so every flag that
+        // was on turns off and the old expression was always 0 on that transition - none of the
+        // consumers below ever ran. AnimatedEmojiDrawable is the sharpest case: initDocument()
+        // reads cached lite-mode booleans that are only refreshed inside updateAll() (see
+        // updateLiteModeValues()), so an already-playing Lottie/WEBM emoji kept decoding and
+        // draining battery until something unrelated recreated its drawable. XOR reports a
+        // change in either direction and is safe here: the disengage transition (oldValue == 0)
+        // already behaved this way under the old expression, and every consumer below is correct
+        // to re-run on a flag going off, not just on - reloadWallpaper(true) in particular is the
+        // same unconditional call already made when leaving Lite Mode settings, and is what
+        // flattens an animated MotionBackgroundDrawable into a static bitmap once
+        // FLAG_CHAT_BACKGROUND is off (see Theme#createBackgroundDrawable).
+        int changedFlags = oldValue ^ newValue;
         if ((changedFlags & FLAGS_ANIMATED_EMOJI) > 0) {
             AnimatedEmojiDrawable.updateAll();
         }
