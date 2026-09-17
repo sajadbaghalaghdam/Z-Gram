@@ -509,6 +509,16 @@ public class AnimatedEmojiSpan extends ReplacementSpan {
         }
 
         public void invalidate() {
+            // ZG perf: this is the notification a document fires through
+            // AnimatedEmojiDrawable.invalidate() -> holders.get(i).invalidate() whenever it gets a
+            // new frame or, via ImageReceiver's setImageBitmapByKey override, when its image first
+            // loads. Mark the owning chunk dirty so SpansChunk.hasFrameToRender() schedules at
+            // least one more background pass even if nothing is "running" yet - otherwise an image
+            // that finishes loading after the chunk's first synchronous render would never
+            // composite (see the dirty field on SpansChunk for the full reasoning).
+            if (spansChunk != null) {
+                spansChunk.dirty = true;
+            }
             if (view != null) {
                 if (invalidateInParent && view.getParent() != null) {
                     ((View) view.getParent()).invalidate();
@@ -871,6 +881,7 @@ public class AnimatedEmojiSpan extends ReplacementSpan {
                 SpansChunk chunk = groupedByLayout.remove(oldText);
                 if (chunk != null) {
                     chunk.layout = newText;
+                    chunk.dirty = true; // ZG perf: layout swapped out from under the chunk - see SpansChunk.dirty
                     for (int i = 0; i < chunk.holders.size(); i++) {
                         chunk.holders.get(i).layout = newText;
                     }
@@ -888,6 +899,14 @@ public class AnimatedEmojiSpan extends ReplacementSpan {
         DrawingInBackgroundThreadDrawable backgroundThreadDrawable;
         private final boolean allowBackgroundRendering;
 
+        // ZG perf: edge-triggered companion to the "is anything animating" check in
+        // hasFrameToRender() below. A holder can gain real new content - an image finishing
+        // load, a document swapped in on rebind - with nothing currently "running", and that
+        // must still force exactly one more background pass or the new content never composites
+        // (see AnimatedEmojiHolder.invalidate() and replaceLayout()). Starts true so a freshly
+        // created chunk always renders its first pass regardless of animation state.
+        boolean dirty = true;
+
         public SpansChunk(View view, Layout layout, boolean allowBackgroundRendering) {
             this.layout = layout;
             this.view = view;
@@ -897,12 +916,14 @@ public class AnimatedEmojiSpan extends ReplacementSpan {
         public void add(AnimatedEmojiHolder holder) {
             holders.add(holder);
             holder.spansChunk = this;
+            dirty = true;
             checkBackgroundRendering();
         }
 
         public void remove(AnimatedEmojiHolder holder) {
             holders.remove(holder);
             holder.spansChunk = null;
+            dirty = true;
             checkBackgroundRendering();
         }
 
@@ -917,11 +938,18 @@ public class AnimatedEmojiSpan extends ReplacementSpan {
                     // holder actually produced a new frame - that made a chunk of 10+ inline emoji
                     // (a common shape for DialogCell titles/previews and ChatMessageCell text) spin
                     // forever once created, even with every emoji fully static (frozen by LiteMode,
-                    // or a genuinely non-animated custom emoji document). Only keep the loop alive
-                    // while something is actually decoding; a real change elsewhere (attach, scroll,
-                    // an emoji that starts playing) still reaches the screen via
-                    // AnimatedEmojiHolder.invalidate(), which pings the parent view directly and is
-                    // unrelated to this loop.
+                    // or a genuinely non-animated custom emoji document).
+                    //
+                    // Level-triggered: keep going while at least one holder is actually decoding.
+                    // Edge-triggered: "dirty" (above) additionally forces exactly one more pass
+                    // whenever a holder gains real new content with nothing currently running - an
+                    // image finishing load after the chunk's first synchronous render is the case
+                    // that matters (AnimatedEmojiHolder.invalidate() below and replaceLayout() both
+                    // set it). Consuming it only on the branch that reads it means a chunk that is
+                    // genuinely idle settles to zero background passes, but nothing can be left
+                    // stale: every holder add/remove, every invalidate a document fires, and every
+                    // layout rebuild schedules at least one render before the loop is allowed to
+                    // stop again.
                     @Override
                     public boolean hasFrameToRender() {
                         for (int i = 0; i < holders.size(); ++i) {
@@ -933,6 +961,10 @@ public class AnimatedEmojiSpan extends ReplacementSpan {
                             if (imageReceiver != null && (imageReceiver.isAnimationRunning() || imageReceiver.isLottieRunning())) {
                                 return true;
                             }
+                        }
+                        if (dirty) {
+                            dirty = false;
+                            return true;
                         }
                         return false;
                     }
@@ -999,6 +1031,7 @@ public class AnimatedEmojiSpan extends ReplacementSpan {
                     }
                 };
                 backgroundThreadDrawable.padding = AndroidUtilities.dp(3);
+                dirty = true; // ZG perf: explicit for a fresh attach, even though the field already defaults true
                 backgroundThreadDrawable.onAttachToWindow();
             } else if (holders.size() < 10 && backgroundThreadDrawable != null) {
                 backgroundThreadDrawable.onDetachFromWindow();
