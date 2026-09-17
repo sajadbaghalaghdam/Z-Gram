@@ -336,9 +336,18 @@ public class ConnectionsManager extends BaseController {
         SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
         if (preferences.contains("pushConnection")) {
             return preferences.getBoolean("pushConnection", true);
-        } else {
-            return MessagesController.getMainSettings(UserConfig.selectedAccount).getBoolean("backgroundConnection", false);
         }
+        // ZG: upstream falls back to the server-driven "backgroundConnection" flag, which is off by
+        // default because the official build receives pushes through Telegram's own Firebase
+        // project. A self-built app cannot: an FCM registration token is scoped to the project
+        // that issued it, so a token minted by this fork's project is not something Telegram's
+        // push servers hold credentials for. That leaves the keep-alive connection as the only
+        // way background notifications arrive here, and it is off unless the user finds the
+        // toggle in Settings > Notifications, so messages only land when the app is next opened.
+        // Default it on instead. An explicit choice still wins - the branch above reads the
+        // "pushConnection" preference first, which is what that toggle writes - so a user who
+        // turns it off keeps it off.
+        return true;
     }
 
     public long getCurrentTimeMillis() {
