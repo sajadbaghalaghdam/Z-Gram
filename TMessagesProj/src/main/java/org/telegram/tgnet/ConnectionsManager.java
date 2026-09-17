@@ -200,6 +200,58 @@ public class ConnectionsManager extends BaseController {
         return localInstance;
     }
 
+    // ZG: the stock string is Build.MANUFACTURER + Build.MODEL with no separator, so Settings >
+    // Devices shows this phone as "samsungSM-S918B". Prefer the device's own marketing name
+    // (Settings.Global "device_name", which is "Galaxy S23 Ultra" here) and prefix the
+    // manufacturer when it is not already part of that name, so the session reads
+    // "Samsung Galaxy S23 Ultra" the way the iOS client and Telegram X do. Everything is
+    // best-effort: any failure falls back to a properly spaced manufacturer + model, and the
+    // caller still guards against an empty result.
+    private static String buildDeviceModel() {
+        String manufacturer = capitalizeDeviceWord(Build.MANUFACTURER);
+        String model = Build.MODEL == null ? "" : Build.MODEL.trim();
+        String name = null;
+        try {
+            android.content.ContentResolver resolver = ApplicationLoader.applicationContext.getContentResolver();
+            if (Build.VERSION.SDK_INT >= 25) {
+                name = android.provider.Settings.Global.getString(resolver, "device_name");
+            }
+            if (TextUtils.isEmpty(name)) {
+                name = android.provider.Settings.Secure.getString(resolver, "bluetooth_name");
+            }
+        } catch (Throwable ignore) {
+        }
+        if (name != null) {
+            name = name.trim();
+        }
+        // A name the system gave us is the one the owner sees on the device itself, so use it
+        // verbatim - prefixing the vendor turns "Sajjad's S23 Ultra" into the awkward
+        // "Samsung Sajjad's S23 Ultra". Telegram Desktop reports the plain machine name too.
+        if (!TextUtils.isEmpty(name)) {
+            return name;
+        }
+        if (TextUtils.isEmpty(model)) {
+            return manufacturer;
+        }
+        if (TextUtils.isEmpty(manufacturer) || model.toLowerCase().startsWith(manufacturer.toLowerCase())) {
+            return model;
+        }
+        return manufacturer + " " + model;
+    }
+
+    // "samsung" -> "Samsung", while leaving names that already carry their own casing
+    // ("LGE", "HMD Global", "OnePlus") untouched.
+    private static String capitalizeDeviceWord(String value) {
+        if (TextUtils.isEmpty(value)) {
+            return "";
+        }
+        value = value.trim();
+        if (value.isEmpty() || !value.equals(value.toLowerCase())) {
+            return value;
+        }
+        return Character.toUpperCase(value.charAt(0)) + value.substring(1);
+    }
+
     public ConnectionsManager(int instance) {
         super(instance);
         connectionState = native_getConnectionState(currentAccount);
@@ -218,7 +270,7 @@ public class ConnectionsManager extends BaseController {
         try {
             systemLangCode = LocaleController.getSystemLocaleStringIso639().toLowerCase();
             langCode = LocaleController.getLocaleStringIso639().toLowerCase();
-            deviceModel = Build.MANUFACTURER + Build.MODEL;
+            deviceModel = buildDeviceModel();
             PackageInfo pInfo = ApplicationLoader.applicationContext.getPackageManager().getPackageInfo(ApplicationLoader.applicationContext.getPackageName(), 0);
             appVersion = pInfo.versionName + " (" + pInfo.versionCode + ")";
             if (BuildVars.DEBUG_PRIVATE_VERSION) {
