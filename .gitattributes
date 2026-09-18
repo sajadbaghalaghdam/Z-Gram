@@ -1,0 +1,8 @@
+# Runtime-parsed text assets must stay LF regardless of core.autocrlf: the theme reader hands
+# each "key=value" line of an .attheme file to Utilities.parseInt, which returns 0 for "-1\r".
+# Shaders, SVG/JSON and the other res/raw files are kept LF for the same reason.
+*.attheme text eol=lf
+TMessagesProj/src/main/assets/shaders/** text eol=lf
+TMessagesProj/src/main/assets/org/** text eol=lf
+TMessagesProj/src/main/assets/youtube_embed.html text eol=lf
+TMessagesProj/src/main/res/raw/** text=auto eol=lf
